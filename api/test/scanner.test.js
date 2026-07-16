@@ -233,6 +233,26 @@ describe('scan pipeline', () => {
     expect(fs.existsSync(arranged)).toBe(true);
   });
 
+  it('broadcasts a scan summary event once the run finishes', async () => {
+    const events = [];
+    const fakeBroadcaster = { broadcast: (e) => events.push(e) };
+    const igdb = createIgdbClient({ models: ctx.models });
+    const scanner = createScanner({ models: ctx.models, igdb, broadcaster: fakeBroadcaster });
+
+    makeGameFolder(libRoot, 'Helldivers 2');
+    await ctx.models.Library.create({ path: libRoot });
+
+    await scanner.scanAll();
+
+    const summary = events.find((e) => e.type === 'scan');
+    expect(summary).toBeTruthy();
+    expect(summary.found).toBe(1);
+    expect(summary.completed).toBe(1);
+    expect(summary.unmatched).toBe(0);
+    expect(summary.failed).toBe(0);
+    expect(summary.adopted).toBe(0);
+  });
+
   it('marks a job Failed and preserves the source when matching errors', async () => {
     nock.cleanAll();
     // No IGDB stubs -> the matching request fails -> job fails.

@@ -420,6 +420,9 @@ export function createScanner({ models, igdb, broadcaster, logger = NULL_LOGGER 
           (adopted ? `, adopted ${adopted} existing folder${adopted === 1 ? '' : 's'}` : ''),
         { meta: { found: queued.length, adopted } },
       );
+      let completed = 0;
+      let unmatched = 0;
+      let failed = 0;
       for (const job of queued) {
         if (cancelRequested) {
           // Cancelled before this job started mark it failed and move on so
@@ -428,12 +431,28 @@ export function createScanner({ models, igdb, broadcaster, logger = NULL_LOGGER 
           job.error = 'Cancelled';
           // eslint-disable-next-line no-await-in-loop
           await setStage(job, GAME_STATUS.FAILED, 0);
+          failed += 1;
           continue;
         }
         // eslint-disable-next-line no-await-in-loop
         await processJob(job);
+        if (job.stage === GAME_STATUS.COMPLETED) completed += 1;
+        else if (job.stage === GAME_STATUS.UNMATCHED) unmatched += 1;
+        else failed += 1;
       }
-      return { queued: queued.length, adopted };
+      // One summary event per scan so clients can surface "scan finished" as
+      // more than silence  per-job "job" events already cover live progress,
+      // but nothing previously told the UI the run as a whole was done.
+      broadcaster.broadcast({
+        type: 'scan',
+        found: queued.length,
+        adopted,
+        completed,
+        unmatched,
+        failed,
+        cancelled: cancelRequested,
+      });
+      return { queued: queued.length, adopted, completed, unmatched, failed };
     } finally {
       running = false;
       cancelRequested = false;
