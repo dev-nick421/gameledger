@@ -1,0 +1,444 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { GAME_STATUS, JOB_STATUS } from '../db/index.js';
+import { processArtwork } from './artwork.js';
+import { createArchive } from './compression.js';
+import { generateFolderName } from './naming.js';
+
+// Derive a clean, searchable title from a folder/zip name:
+//   "HELLDIVERS.2.zip" -> "HELLDIVERS 2"
+export function cleanSourceName(name) {
+  return name
+    .replace(/\.zip$/i, '')
+    .replace(/[._]+/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+/**
+ * The scan pipeline and job queue. Only one scan runs at a time (in-process
+ * guard); a second trigger throws SCAN_RUNNING so the route can return 409.
+ */
+// Thrown when a job is interrupted by a user cancel; treated as a clean stop
+// rather than an error so the message stays friendly.
+class CancelledError extends Error {
+  constructor() {
+    super('Cancelled');
+    this.cancelled = true;
+  }
+}
+
+// No-op logger so the scanner works in tests/contexts without one wired in.
+const NULL_LOGGER = { system: () => {}, scanner: () => {} };
+
+export function createScanner({ models, igdb, broadcaster, logger = NULL_LOGGER }) {
+  const { Library, Game, Screenshot, Job, Setting } = models;
+  // Sequelize instance needed for transactions.
+  const { sequelize } = Game;
+  let running = false;
+  let cancelRequested = false;
+  let abortController = null;
+
+  const isRunning = () => running;
+
+  function throwIfCancelled() {
+    if (cancelRequested) throw new CancelledError();
+  }
+
+  function emit(job) {
+    broadcaster.broadcast({
+      type: 'job',
+      jobId: job.id,
+      sourceName: job.sourceName,
+      stage: job.stage,
+      status: job.status,
+      progress: job.progress,
+      igdbId: job.igdbId,
+      error: job.error,
+    });
+  }
+
+  async function setStage(job, stage, progress) {
+    job.stage = stage;
+    if (progress != null) job.progress = progress;
+    await job.save();
+    emit(job);
+  }
+
+  async function getSetting() {
+    const [setting] = await Setting.findOrCreate({ where: { id: 1 }, defaults: { id: 1 } });
+    return setting;
+  }
+
+  async function getNamingScheme() {
+    return (await getSetting()).namingScheme;
+  }
+
+  // Detect candidate inputs: top-level directories and *.zip files,
+  // skipping entries that are already known game output folders or sources.
+  async function detectInputs(libraryPath) {
+    const namingScheme = await getNamingScheme();
+    const knownGames = await Game.findAll({
+      attributes: ['gamePath', 'sourcePath', 'igdbId', 'title', 'releaseYear', 'libraryPath'],
+    });
+
+    const excluded = new Set();
+    for (const g of knownGames) {
+      if (g.sourcePath) excluded.add(g.sourcePath);
+      if (g.gamePath) {
+        excluded.add(g.gamePath);
+      } else if (g.igdbId > 0 && g.libraryPath && g.title) {
+        // Reconstruct the expected folder path from the stored identity so a re-scan doesn't treat the
+        // already-processed game folder as a fresh source and destroy it
+        const reconstructed = path.join(
+          g.libraryPath,
+          generateFolderName(
+            { title: g.title, releaseYear: g.releaseYear, igdbId: g.igdbId },
+            namingScheme,
+          ),
+        );
+        if (reconstructed) excluded.add(reconstructed);
+      }
+    }
+
+    let entries;
+    try {
+      entries = await fs.promises.readdir(libraryPath, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    const inputs = [];
+    for (const entry of entries) {
+      const full = path.join(libraryPath, entry.name);
+      if (excluded.has(full)) continue;
+      if (entry.isDirectory()) inputs.push({ name: entry.name, path: full });
+      else if (entry.isFile() && entry.name.toLowerCase().endsWith('.zip')) {
+        inputs.push({ name: entry.name, path: full });
+      }
+    }
+    return inputs;
+  }
+
+  // Create or update the catalogued Game row + screenshots for a matched game.
+  // Transaction so the game record and its screenshots are always written together
+  async function upsertGame(igdbId, data, art, sourceName, { gamePath, archivePath, libraryPath: libPath }) {
+    const releaseYear = data.first_release_date
+      ? new Date(data.first_release_date * 1000).getUTCFullYear()
+      : null;
+    const fields = {
+      igdbId,
+      title: data.name ?? cleanSourceName(sourceName),
+      releaseYear,
+      summary: data.summary ?? null,
+      genres: (data.genres ?? []).map((g) => g.name),
+      platforms: (data.platforms ?? []).map((p) => p.name),
+      rating: data.rating != null ? Math.round(data.rating) : null,
+      coverPath: art.coverPath,
+      backgroundPath: art.backgroundPath,
+      accentColorPrimary: art.accentPrimary,
+      accentColorSecondary: art.accentSecondary,
+      status: GAME_STATUS.COMPLETED,
+      sourceName,
+      sourcePath: null,
+      gamePath,
+      archivePath,
+      libraryPath: libPath,
+    };
+
+    await sequelize.transaction(async (t) => {
+      await Game.upsert(fields, { transaction: t });
+      await Screenshot.destroy({ where: { igdbId }, transaction: t });
+      if (art.screenshots?.length) {
+        await Screenshot.bulkCreate(
+          art.screenshots.map((s) => ({ igdbId, path: s.path, order: s.order })),
+          { transaction: t },
+        );
+      }
+    });
+  }
+
+  async function processJob(job) {
+    // Track any game folder created this run so a failed/cancelled job can be
+    // rolled back to leave no half-written artifacts.
+    let createdGamePath = null;
+    try {
+      throwIfCancelled();
+      job.status = JOB_STATUS.RUNNING;
+      await setStage(job, GAME_STATUS.SCANNING, 5);
+
+      const query = cleanSourceName(job.sourceName);
+      throwIfCancelled();
+      await setStage(job, GAME_STATUS.MATCHING, 15);
+      const { match } = await igdb.autoMatch(query);
+
+      if (!match) {
+        // Below threshold hold as Unmatched, preserve the source for later
+        // correction. This is terminal-but-not-failed.
+        const placeholderId = -job.id;
+        await Game.upsert({
+          igdbId: placeholderId,
+          title: query,
+          status: GAME_STATUS.UNMATCHED,
+          sourceName: job.sourceName,
+          sourcePath: job.sourcePath,
+          gamePath: null,
+          archivePath: null,
+          libraryPath: job.libraryPath,
+        });
+        job.igdbId = placeholderId;
+        job.status = JOB_STATUS.COMPLETED;
+        await setStage(job, GAME_STATUS.UNMATCHED, 100);
+        logger.system(`no confident match for "${query}" left unmatched`, { level: 'warn' });
+        return;
+      }
+
+      throwIfCancelled();
+      job.igdbId = match.id;
+      await setStage(job, GAME_STATUS.FETCHING_METADATA, 35);
+      logger.system(`fetching metadata for "${match.name ?? query}"`, { meta: { igdbId: match.id } });
+      const data = (await igdb.getGame(match.id)) ?? match;
+
+      // Build the named game folder structure inside the library path.
+      const namingScheme = await getNamingScheme();
+      const releaseYear = data.first_release_date
+        ? new Date(data.first_release_date * 1000).getUTCFullYear()
+        : null;
+      const folderName = generateFolderName(
+        { title: data.name ?? query, releaseYear, igdbId: match.id },
+        namingScheme,
+      );
+      const gamePath = path.join(job.libraryPath, folderName);
+      const artworkDir = path.join(gamePath, 'artwork');
+      const dataDir = path.join(gamePath, 'data');
+
+      await fs.promises.mkdir(artworkDir, { recursive: true });
+      await fs.promises.mkdir(dataDir, { recursive: true });
+      createdGamePath = gamePath;
+
+      throwIfCancelled();
+      const art = await processArtwork(match.id, data, artworkDir, abortController?.signal);
+
+      throwIfCancelled();
+      await setStage(job, GAME_STATUS.COMPRESSING, 60);
+      const level = (await getSetting()).compressionLevel;
+      logger.system(`compressing "${folderName}" to .zip`, { meta: { level } });
+      const archiveName = `${folderName}.zip`;
+      const archivePath = path.join(dataDir, archiveName);
+      const tmpDest = `${archivePath}.tmp`;
+
+      // Compress to a .tmp file in the same directory so the final rename is
+      // always atomic (same filesystem as the destination). An abort tears the
+      // compression down mid-flight and the partial folder is removed below.
+      await createArchive(
+        job.sourcePath,
+        tmpDest,
+        (pct) => {
+          job.progress = 60 + Math.floor(pct * 0.39);
+          emit(job);
+        },
+        abortController?.signal,
+        level,
+      );
+      throwIfCancelled();
+      await fs.promises.rename(tmpDest, archivePath);
+
+      await upsertGame(match.id, data, art, job.sourceName, {
+        gamePath,
+        archivePath,
+        libraryPath: job.libraryPath,
+      });
+
+      // Source removed only after a fully successful pipeline.
+      await fs.promises.rm(job.sourcePath, { recursive: true, force: true });
+
+      // Committed keep the folder.
+      createdGamePath = null;
+      job.status = JOB_STATUS.COMPLETED;
+      await setStage(job, GAME_STATUS.COMPLETED, 100);
+      logger.system(`catalogued "${data.name ?? folderName}"`, { meta: { igdbId: match.id } });
+    } catch (err) {
+      // Roll back the partial game folder so a failed/cancelled run leaves the
+      // library clean. The source is never touched until the very end, so the
+      // original always stays intact.
+      if (createdGamePath) {
+        await fs.promises.rm(createdGamePath, { recursive: true, force: true }).catch(() => {});
+      }
+      job.status = JOB_STATUS.FAILED;
+      job.error = err?.cancelled
+        ? 'Cancelled'
+        : err?.message
+          ? String(err.message)
+          : 'Unknown error';
+      await setStage(job, GAME_STATUS.FAILED, job.progress);
+      if (!err?.cancelled) {
+        logger.system(`failed processing "${job.sourceName}": ${job.error}`, { level: 'error' });
+      }
+    }
+  }
+
+  async function scanAll() {
+    if (running) {
+      const err = new Error('Scan already in progress');
+      err.code = 'SCAN_RUNNING';
+      throw err;
+    }
+    running = true;
+    cancelRequested = false;
+    abortController = new AbortController();
+    try {
+      const libraries = await Library.findAll();
+      const queued = [];
+      for (const lib of libraries) {
+        const inputs = await detectInputs(lib.path);
+        for (const input of inputs) {
+          const job = await Job.create({
+            sourceName: input.name,
+            sourcePath: input.path,
+            libraryPath: lib.path,
+            status: JOB_STATUS.PENDING,
+            stage: GAME_STATUS.PENDING,
+          });
+          queued.push(job);
+        }
+      }
+      logger.system(`scan found ${queued.length} new item${queued.length === 1 ? '' : 's'}`, {
+        meta: { found: queued.length },
+      });
+      for (const job of queued) {
+        if (cancelRequested) {
+          // Cancelled before this job started mark it failed and move on so
+          // the queue drains immediately instead of processing the backlog.
+          job.status = JOB_STATUS.FAILED;
+          job.error = 'Cancelled';
+          // eslint-disable-next-line no-await-in-loop
+          await setStage(job, GAME_STATUS.FAILED, 0);
+          continue;
+        }
+        // eslint-disable-next-line no-await-in-loop
+        await processJob(job);
+      }
+      return { queued: queued.length };
+    } finally {
+      running = false;
+      cancelRequested = false;
+      abortController = null;
+    }
+  }
+
+  /**
+   * Request cancellation of the active scan: abort in-flight downloads and
+   * compression, and mark every pending/running job failed so the queue and
+   * library clear immediately. The in-process guard is released by scanAll's
+   * finally block once the aborted job unwinds. Safe to call when idle
+   */
+  async function cancelScan() {
+    cancelRequested = true;
+    abortController?.abort();
+    const [cancelled] = await Job.update(
+      { status: JOB_STATUS.FAILED, error: 'Cancelled', stage: GAME_STATUS.FAILED },
+      { where: { status: [JOB_STATUS.PENDING, JOB_STATUS.RUNNING] } },
+    );
+    if (cancelled) {
+      logger.system(`scan cancelled ${cancelled} job${cancelled === 1 ? '' : 's'} stopped`, {
+        level: 'warn',
+      });
+    }
+    return { cancelled };
+  }
+
+  async function retryJob(jobId) {
+    if (running) {
+      const err = new Error('Scan already in progress');
+      err.code = 'SCAN_RUNNING';
+      throw err;
+    }
+    const job = await Job.findByPk(jobId);
+    if (!job) return null;
+    running = true;
+    cancelRequested = false;
+    abortController = new AbortController();
+    try {
+      job.error = null;
+      job.progress = 0;
+      await processJob(job);
+      return job;
+    } finally {
+      running = false;
+      cancelRequested = false;
+      abortController = null;
+    }
+  }
+
+  /**
+   * Reconcile the catalogue with what's actually on disk
+   *
+   * Pruning rules:
+   *  - Completed game with no archivePath  → broken/pre-migration record, prune.
+   *  - Completed game whose archivePath is missing from disk → prune.
+   *  - Unmatched game with no sourcePath   → source already gone, prune.
+   *  - Unmatched game whose sourcePath is missing from disk → prune.
+   *
+   * Games in any other status (Pending/Scanning/…) are left alone they belong
+   * to an active scan or will be handled by the server-restart reset.
+   */
+  async function refreshLibrary() {
+    const games = await Game.findAll();
+    let removed = 0;
+    for (const game of games) {
+      let shouldPrune = false;
+
+      if (game.custom) {
+        // Hand-authored games have no scanned source or archive on disk;
+        // they're managed entirely through the UI -> skip
+        continue;
+      }
+
+      if (game.status === GAME_STATUS.COMPLETED) {
+        if (!game.archivePath) {
+          // No archive path stored record predates the column or the scan
+          // failed mid-way and left a stale entry. Can never be served.
+          shouldPrune = true;
+        } else {
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            await fs.promises.access(game.archivePath);
+          } catch {
+            shouldPrune = true;
+          }
+        }
+      } else if (game.status === GAME_STATUS.UNMATCHED) {
+        if (!game.sourcePath) {
+          shouldPrune = true;
+        } else {
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            await fs.promises.access(game.sourcePath);
+          } catch {
+            shouldPrune = true;
+          }
+        }
+      }
+
+      if (shouldPrune) {
+        // eslint-disable-next-line no-await-in-loop
+        await Screenshot.destroy({ where: { igdbId: game.igdbId } });
+        // eslint-disable-next-line no-await-in-loop
+        await Game.destroy({ where: { igdbId: game.igdbId } });
+        removed += 1;
+      }
+    }
+    return { removed };
+  }
+
+  return {
+    scanAll,
+    processJob,
+    retryJob,
+    cancelScan,
+    refreshLibrary,
+    isRunning,
+    detectInputs,
+  };
+}
+
+export default createScanner;

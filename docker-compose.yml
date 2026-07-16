@@ -1,0 +1,35 @@
+# Deployment using prebuilt images from ghcr
+#
+#   cp .env.example .env   # set ADMIN_PASSWORD and LIBRARY_PATH
+#   docker compose up -d
+#
+# Images are published by the Release workflow on every version tag. If you
+# forked/renamed the repo, override the owner so the right images are pulled:
+#   IMAGE_OWNER=your-gh-username  (or set it in .env)
+#
+# Pin a specific release with IMAGE_TAG=v1.0.0 instead of the default `latest`.
+services:
+  api:
+    image: ghcr.io/${IMAGE_OWNER:-dev-nick421}/gameledger-api:${IMAGE_TAG:-latest}
+    environment:
+      # REQUIRED in production —> app will refuse to start with a default value.
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
+      PORT: 3000
+      DATABASE_PATH: /app/data/gameledger.sqlite
+      MATCH_THRESHOLD: ${MATCH_THRESHOLD:-0.6}
+    volumes:
+      - api-data:/app/data
+      # Mount your game library (read-write so processed sources can be removed).
+      - ${LIBRARY_PATH:-./games}:/games
+    restart: unless-stopped
+
+  web:
+    image: ghcr.io/${IMAGE_OWNER:-dev-nick421}/gameledger-web:${IMAGE_TAG:-latest}
+    ports:
+      - '${WEB_PORT:-8080}:80'
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  api-data:

@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light dark;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  @apply bg-gray-50 text-gray-900 dark:bg-shelf-bg dark:text-gray-100;
+  margin: 0;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition;
+  }
+  .btn-primary {
+    @apply btn bg-shelf-accent text-white hover:brightness-110 disabled:opacity-50;
+  }
+  .btn-ghost {
+    @apply btn bg-gray-200 text-gray-800 hover:bg-gray-300 dark:bg-shelf-elevated dark:text-gray-100 dark:hover:bg-shelf-border;
+  }
+  .card {
+    @apply rounded-xl border border-gray-200 bg-white shadow-sm dark:border-shelf-border dark:bg-shelf-surface;
+  }
+  .input {
+    @apply w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-shelf-accent dark:border-shelf-border dark:bg-shelf-elevated dark:text-gray-100;
+  }
+  .badge {
+    @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold;
+  }
+}
+
+@layer utilities {
+  /* Hide the native horizontal scrollbar on rails that scroll via arrows */
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
