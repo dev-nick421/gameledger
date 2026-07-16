@@ -34,8 +34,7 @@ function announceScan(summary) {
   toastStore.push(`Scan complete: ${parts.join(', ')}.`, failed ? 'warn' : 'ok');
 }
 
-// Same idea as announceScan: a bulk metadata refresh (issue #6) previously ran
-// with no feedback either. One toast when it finishes, wherever the user is.
+// Same idea as announceScan: a bulk metadata refresh
 function announceMetadataRefresh(summary) {
   const { total, updated, skipped, failed } = summary;
   if (total === 0) {

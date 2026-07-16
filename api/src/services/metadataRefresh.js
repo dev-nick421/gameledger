@@ -24,12 +24,10 @@ export function isMissingMetadata(game) {
 }
 
 /**
- * Bulk-refreshes catalogued games' metadata/artwork from IGDB (issue #6).
- * Never touches gamePath/archivePath/folder names  per the naming-system
- * invariant, metadata corrections are cheap DB + artwork-file updates, not
- * relocations, so this is safe to run repeatedly on a live library.
+ * Bulk-refreshes catalogued games' metadata/artwork from IGDB.
+ * safe to run repeatedly on a live library.
  *
- * Two modes:
+ * options:
  *  - "all":     re-fetch every catalogued game, unconditionally overwriting
  *               metadata and wiping + redownloading all artwork. This is the
  *               one to reach for when a field is wrong-but-present (e.g. a

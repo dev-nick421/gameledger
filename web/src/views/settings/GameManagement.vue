@@ -51,8 +51,7 @@ async function remove(game) {
   }
 }
 
-// Bulk metadata refresh (issue #6). Fire-and-forget: progress/completion come
-// back over the WebSocket via metadataRefreshStore, same pattern as scanning.
+// Bulk metadata refresh
 async function refreshMetadata(mode) {
   try {
     await client.post('/games/refresh-metadata', { mode });

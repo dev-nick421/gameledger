@@ -147,11 +147,8 @@ export function gameRoutes({ models, igdb, namingSchemeProvider, metadataRefresh
     res.json({ items, total: items.length });
   });
 
-  // Bulk metadata refresh from IGDB (issue #6): "all" unconditionally
-  // overwrites metadata + wipes/redownloads artwork for every game; "missing"
-  // only touches games with a blank field, filling in just the blanks. Never
-  // moves/renames gamePath/archivePath  a metadata correction is a cheap
-  // DB + artwork-file update, not a relocation.
+  // Bulk metadata refresh from Provider "all" unconditionally
+  // overwrites metadata + wipes/redownloads artwork for every game
   router.post('/games/refresh-metadata', requireAuth, async (req, res) => {
     const mode = req.body?.mode === 'all' ? 'all' : 'missing';
     if (metadataRefresher.isRunning()) {
@@ -166,9 +163,8 @@ export function gameRoutes({ models, igdb, namingSchemeProvider, metadataRefresh
     return res.status(202).json({ started: true, mode });
   });
 
-  // List top-level folders/zips in all library paths that aren't already
-  // catalogued game folders or source paths. 
-  // Used by folder-picker in the for custom games
+  // List top-level folders/zips in all library paths that aren't already catalogued game folders or source paths. 
+  // Used by folder-picker for custom games
   router.get('/games/unprocessed-sources', requireAuth, async (req, res) => {
     const libraries = await Library.findAll();
     const knownGames = await Game.findAll({ attributes: ['gamePath', 'sourcePath'] });
@@ -202,8 +198,7 @@ export function gameRoutes({ models, igdb, namingSchemeProvider, metadataRefresh
   });
 
   // Process a selected library folder as a custom game: compresses contents into
-  // the standard /data + /artwork structure, records a real archivePath so the
-  // game appears in the library identically to a scanned game.
+  // the standard /data + /artwork structure, records archivePath so game appears in the library identically to scanned game.
   router.post('/games/process-custom', requireAuth, customUpload, async (req, res) => {
     const body = req.body ?? {};
     const { sourcePath } = body;

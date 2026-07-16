@@ -1,8 +1,6 @@
 import { defineStore } from 'pinia';
 
-// Live state for a bulk metadata refresh run (issue #6), fed from the
-// WebSocket via App.vue so any page can show it's in progress and react once
-// it completes (e.g. Manage Games reloading its table).
+// Live state for a bulk metadata refresh run fed from WebSocket via App.vue so any page can show progress and react once complete
 export const useMetadataRefreshStore = defineStore('metadataRefresh', {
   state: () => ({ running: false, total: 0, done: 0, lastSummary: null }),
   actions: {
