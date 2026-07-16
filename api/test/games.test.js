@@ -188,6 +188,33 @@ describe('games API', () => {
     expect(res.status).toBe(401);
   });
 
+  it('flags a catalogued game with blank fields as missing metadata', async () => {
+    // The setup scan's IGDB stub only returns id/name/first_release_date, so
+    // summary/genres/platforms/rating are all still blank.
+    const res = await request(ctx.app).get('/api/games/manage').set(authHeader());
+    expect(res.status).toBe(200);
+    const card = res.body.items.find((i) => i.igdbId === 250616);
+    expect(card.missingMetadata).toBe(true);
+  });
+
+  it('requires auth to trigger a metadata refresh', async () => {
+    const res = await request(ctx.app).post('/api/games/refresh-metadata');
+    expect(res.status).toBe(401);
+  });
+
+  it('accepts a metadata refresh trigger and rejects a concurrent one', async () => {
+    const res = await request(ctx.app)
+      .post('/api/games/refresh-metadata')
+      .set(authHeader())
+      .send({ mode: 'missing' });
+    expect(res.status).toBe(202);
+    expect(res.body).toEqual({ started: true, mode: 'missing' });
+
+    ctx.metadataRefresher.isRunning = () => true; // simulate an in-flight run
+    const dup = await request(ctx.app).post('/api/games/refresh-metadata').set(authHeader());
+    expect(dup.status).toBe(409);
+  });
+
   it('lists unprocessed library folders', async () => {
     // A fresh folder that has never been scanned should surface as a source.
     makeGameFolder(libRoot, 'Brand New Folder');

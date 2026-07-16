@@ -10,6 +10,7 @@ import { generateDisplayName, generateDownloadFilename, generateFolderName } fro
 import { processArtwork } from '../services/artwork.js';
 import { createArchive } from '../services/compression.js';
 import { cleanSourceName } from '../services/scanner.js';
+import { isMissingMetadata } from '../services/metadataRefresh.js';
 
 // In-memory upload buffering for hand-authored artwork
 const upload = multer({
@@ -57,7 +58,7 @@ function serializeJobCard(job) {
   };
 }
 
-export function gameRoutes({ models, igdb, namingSchemeProvider, logger }) {
+export function gameRoutes({ models, igdb, namingSchemeProvider, metadataRefresher, logger }) {
   const { Game, Screenshot, Job, Setting, Library } = models;
   const router = Router();
 
@@ -140,13 +141,30 @@ export function gameRoutes({ models, igdb, namingSchemeProvider, logger }) {
       hasArchive: Boolean(g.archivePath),
       coverUrl: coverUrl(g),
       displayName: generateDisplayName(g, namingScheme),
+      missingMetadata:
+        !g.custom && g.status === GAME_STATUS.COMPLETED ? isMissingMetadata(g) : false,
     }));
     res.json({ items, total: items.length });
   });
 
-  // List top-level folders/zips in all library paths that aren't already
-  // catalogued game folders or source paths. 
-  // Used by folder-picker in the for custom games
+  // Bulk metadata refresh from Provider "all" unconditionally
+  // overwrites metadata + wipes/redownloads artwork for every game
+  router.post('/games/refresh-metadata', requireAuth, async (req, res) => {
+    const mode = req.body?.mode === 'all' ? 'all' : 'missing';
+    if (metadataRefresher.isRunning()) {
+      return res.status(409).json({ error: 'Metadata refresh already in progress' });
+    }
+    logger?.user(`triggered a metadata refresh (${mode})`);
+    // Fire-and-forget: progress streams over WebSocket, same as a scan.
+    metadataRefresher.refreshAll(mode).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error('Metadata refresh failed:', err);
+    });
+    return res.status(202).json({ started: true, mode });
+  });
+
+  // List top-level folders/zips in all library paths that aren't already catalogued game folders or source paths. 
+  // Used by folder-picker for custom games
   router.get('/games/unprocessed-sources', requireAuth, async (req, res) => {
     const libraries = await Library.findAll();
     const knownGames = await Game.findAll({ attributes: ['gamePath', 'sourcePath'] });
@@ -180,8 +198,7 @@ export function gameRoutes({ models, igdb, namingSchemeProvider, logger }) {
   });
 
   // Process a selected library folder as a custom game: compresses contents into
-  // the standard /data + /artwork structure, records a real archivePath so the
-  // game appears in the library identically to a scanned game.
+  // the standard /data + /artwork structure, records archivePath so game appears in the library identically to scanned game.
   router.post('/games/process-custom', requireAuth, customUpload, async (req, res) => {
     const body = req.body ?? {};
     const { sourcePath } = body;

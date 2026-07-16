@@ -101,6 +101,23 @@ Critical invariants:
   (route returns 409).
 - **`detectInputs` skips known `gamePath` folders** so the structured output
   directories are never re-queued as new inputs.
+- **Structured folders are recognised on sight, independent of the database.**
+  Any top-level directory containing `artwork/` + `data/*.zip` is gameledger's
+  own output shape, full stop it is never queued as raw scan input even when
+  no `Game` row references it (fresh DB after a reinstall, a library
+  arranged/copied outside a scan, hand-built folders following the naming
+  scheme). Treating it as raw input would re-match it, compress the folder
+  into a zip *inside itself*, then delete it as a "source" once done, silently
+  destroying an already-complete game. Instead `adoptFolder` re-derives the
+  `Game` row directly from disk: it recovers title/year/IGDB ID from the
+  folder or zip name via `naming.parseFolderName` (the scheme's reverse-parse),
+  reuses the existing artwork/archive paths as-is, and refreshes metadata from
+  IGDB on a best-effort basis. If IGDB can't be reached (offline, credentials
+  not yet re-entered after a reinstall, rate-limited, ...) the title/year
+  parsed from the name are used as-is rather than falling back to the raw,
+  still scheme-shaped folder name (e.g. never "Foo - 2025 [12345]" as the
+  title). Folders whose name doesn't fit the active scheme are left untouched
+  and logged as a warning rather than guessed at.
 - **On startup, any `RUNNING` jobs are reset to `FAILED`** so interrupted jobs
   become retryable instead of stuck forever.
 - Compression streams via `archiver` (safe for multi-GB inputs); existing zips are
@@ -152,6 +169,20 @@ Critical invariants:
 - `GET /api/games`, `GET /api/games/:igdbId`, `GET /api/games/:igdbId/download`.
 - `PATCH /api/games/:igdbId/match` reassign IGDB match (see below).
 - `GET /api/igdb/search?q=` admin-only, feeds the correction modal.
+- `POST /api/games/refresh-metadata` (`services/metadataRefresh.js`,
+  admin-only, 409 if one is already running): bulk-refreshes catalogued games
+  from IGDB. `{ mode: "all" }` unconditionally overwrites metadata and
+  wipes+redownloads artwork for every game; `{ mode: "missing" }` (default)
+  only touches games with a blank field (summary/genres/platforms/rating/
+  releaseYear/cover  the same fields the detail page shows as "—"), filling in
+  just the blanks. Custom games are never touched. Fire-and-forget like `/scan`
+  (202, progress + a `metadataRefresh` summary over `/ws`); use "all" to fix a
+  field that's wrong-but-present (e.g. a title that got mangled upstream of
+  IGDB)  "missing" mode won't touch it since it isn't blank. Never
+  moves/renames `gamePath`/`archivePath`: per the naming-system invariant above,
+  a metadata correction is a cheap update, not a relocation. `GET
+  /api/games/manage` includes a `missingMetadata` flag per game so the admin UI
+  can show which ones "Find missing metadata" would affect.
 
 ### Download endpoint
 
@@ -225,3 +256,14 @@ Historically each change was documented in `/docs` as
 `<change-number>-<brief-description>.md`. This file consolidates those notes; keep
 it current when you make a load-bearing decision rather than letting the rationale
 live only in commit messages.
+
+## Code comment style
+
+Not every change needs a comment, and not every comment needs a tracker
+reference. Reserve inline comments for a non-obvious invariant or a reason the
+code isn't the naive version; skip them when the code already reads clearly.
+Keep comments general — describe the constraint or the "why", not the ticket
+that prompted it. Issue/PR numbers rot (issues close, get renumbered, live in
+a tracker most readers of the code will never open); a comment tied to one
+reads as noise once that context is gone. If the origin matters, it belongs in
+the commit message or PR description, not baked into the source.

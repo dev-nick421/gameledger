@@ -32,6 +32,19 @@ const screenshots = ref([]);
 const removeScreenshots = ref(false);
 const existingCover = ref(props.game?.coverUrl ?? null);
 
+// Which fields IGDB never filled in, so the form can flag them the same way
+// the "Missing info" badge does in the table. Custom games aren't IGDB-backed,
+// so blank fields there are just how the user left them, not something to flag.
+const missingFields = reactive({
+  releaseYear: false,
+  summary: false,
+  genres: false,
+  platforms: false,
+  rating: false,
+  cover: false,
+});
+const flagMissing = isEdit && !props.game?.custom;
+
 function onFile(target, event) {
   const files = event.target.files;
   if (target === 'screenshots') screenshots.value = Array.from(files);
@@ -70,6 +83,14 @@ onMounted(async () => {
       form.platforms = (data.platforms ?? []).join(', ');
       form.rating = data.rating ?? '';
       existingCover.value = data.coverUrl;
+      if (flagMissing) {
+        missingFields.releaseYear = data.releaseYear == null;
+        missingFields.summary = !data.summary;
+        missingFields.genres = !data.genres?.length;
+        missingFields.platforms = !data.platforms?.length;
+        missingFields.rating = data.rating == null;
+        missingFields.cover = !data.coverUrl;
+      }
     } catch {
       error.value = 'Failed to load game details.';
     }
@@ -186,29 +207,44 @@ async function submit() {
 
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <label class="mb-1 block text-sm text-gray-500">Release year</label>
-              <input v-model="form.releaseYear" type="number" class="input" placeholder="2024" />
+              <label class="mb-1 flex items-center gap-1 text-sm" :class="missingFields.releaseYear ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500'">
+                Release year
+                <svg v-if="missingFields.releaseYear" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" title="Missing from IGDB"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+              </label>
+              <input v-model="form.releaseYear" type="number" class="input" :class="{ 'ring-1 ring-amber-400 dark:ring-amber-500/60': missingFields.releaseYear }" placeholder="2024" />
             </div>
             <div>
-              <label class="mb-1 block text-sm text-gray-500">Rating (0–100)</label>
-              <input v-model="form.rating" type="number" min="0" max="100" class="input" placeholder="—" />
+              <label class="mb-1 flex items-center gap-1 text-sm" :class="missingFields.rating ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500'">
+                Rating (0–100)
+                <svg v-if="missingFields.rating" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" title="Missing from IGDB"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+              </label>
+              <input v-model="form.rating" type="number" min="0" max="100" class="input" :class="{ 'ring-1 ring-amber-400 dark:ring-amber-500/60': missingFields.rating }" placeholder="—" />
             </div>
           </div>
 
           <div>
-            <label class="mb-1 block text-sm text-gray-500">Summary</label>
-            <textarea v-model="form.summary" rows="3" class="input" placeholder="Short description…"></textarea>
+            <label class="mb-1 flex items-center gap-1 text-sm" :class="missingFields.summary ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500'">
+              Summary
+              <svg v-if="missingFields.summary" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" title="Missing from IGDB"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+            </label>
+            <textarea v-model="form.summary" rows="3" class="input" :class="{ 'ring-1 ring-amber-400 dark:ring-amber-500/60': missingFields.summary }" placeholder="Short description…"></textarea>
           </div>
 
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <label class="mb-1 block text-sm text-gray-500">Genres</label>
-              <input v-model="form.genres" class="input" placeholder="Action, RPG" />
+              <label class="mb-1 flex items-center gap-1 text-sm" :class="missingFields.genres ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500'">
+                Genres
+                <svg v-if="missingFields.genres" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" title="Missing from IGDB"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+              </label>
+              <input v-model="form.genres" class="input" :class="{ 'ring-1 ring-amber-400 dark:ring-amber-500/60': missingFields.genres }" placeholder="Action, RPG" />
               <p class="mt-1 text-xs text-gray-400">Comma-separated</p>
             </div>
             <div>
-              <label class="mb-1 block text-sm text-gray-500">Platforms</label>
-              <input v-model="form.platforms" class="input" placeholder="PC, PS5" />
+              <label class="mb-1 flex items-center gap-1 text-sm" :class="missingFields.platforms ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500'">
+                Platforms
+                <svg v-if="missingFields.platforms" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" title="Missing from IGDB"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+              </label>
+              <input v-model="form.platforms" class="input" :class="{ 'ring-1 ring-amber-400 dark:ring-amber-500/60': missingFields.platforms }" placeholder="PC, PS5" />
               <p class="mt-1 text-xs text-gray-400">Comma-separated</p>
             </div>
           </div>
@@ -216,8 +252,11 @@ async function submit() {
           <!-- Artwork -->
           <div class="grid grid-cols-2 gap-3">
             <div>
-              <label class="mb-1 block text-sm text-gray-500">Cover image</label>
-              <div class="flex items-center gap-2">
+              <label class="mb-1 flex items-center gap-1 text-sm" :class="missingFields.cover ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500'">
+                Cover image
+                <svg v-if="missingFields.cover" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" title="Missing from IGDB"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+              </label>
+              <div class="flex items-center gap-2 rounded-lg p-1" :class="{ 'ring-1 ring-amber-400 dark:ring-amber-500/60': missingFields.cover }">
                 <img v-if="existingCover" :src="existingCover" class="h-16 w-12 rounded object-cover" />
                 <input type="file" accept="image/*" class="text-xs" @change="onFile('cover', $event)" />
               </div>

@@ -19,7 +19,7 @@ async function tryDownload(url, dest, signal) {
 
 // Defensive colour extraction: a failure here must never fail a scan, so we
 // fall back to null and the UI uses its default gradient.
-async function extractColors(imagePath) {
+export async function extractColors(imagePath) {
   try {
     const { default: Vibrant } = await import('node-vibrant');
     const palette = await Vibrant.from(imagePath).getPalette();
@@ -84,4 +84,4 @@ export async function processArtwork(igdbId, igdbData, artworkDir, signal) {
   return result;
 }
 
-export default { processArtwork };
+export default { processArtwork, extractColors };

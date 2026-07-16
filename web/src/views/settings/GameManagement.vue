@@ -1,7 +1,8 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, computed, watch } from 'vue';
 import client from '../../api/client.js';
 import GameFormModal from '../../components/GameFormModal.vue';
+import { useMetadataRefreshStore } from '../../stores/metadataRefresh.js';
 
 // Game Management (CRUD)
 const games = ref([]);
@@ -11,11 +12,17 @@ const search = ref('');
 const editing = ref(null); // game row being edited
 const creating = ref(false);
 
+const metadataRefreshStore = useMetadataRefreshStore();
+const showRefreshModal = ref(false);
+const refreshMode = ref('missing');
+
 const filtered = computed(() => {
   const q = search.value.trim().toLowerCase();
   if (!q) return games.value;
   return games.value.filter((g) => g.title.toLowerCase().includes(q));
 });
+
+const missingCount = computed(() => games.value.filter((g) => g.missingMetadata).length);
 
 async function load() {
   loading.value = true;
@@ -46,6 +53,30 @@ async function remove(game) {
   }
 }
 
+// Bulk metadata refresh
+async function startRefresh() {
+  try {
+    await client.post('/games/refresh-metadata', { mode: refreshMode.value });
+    metadataRefreshStore.start();
+    error.value = null;
+    showRefreshModal.value = false;
+  } catch (err) {
+    error.value =
+      err.response?.status === 409
+        ? 'A metadata refresh is already in progress.'
+        : 'Failed to start the metadata refresh.';
+  }
+}
+
+// Reload the table once a refresh run this page kicked off (or one triggered
+// elsewhere, e.g. a scheduled run) finishes, so corrected titles/artwork show up.
+watch(
+  () => metadataRefreshStore.lastSummary,
+  (summary) => {
+    if (summary) load();
+  },
+);
+
 onMounted(load);
 </script>
 
@@ -56,11 +87,21 @@ onMounted(load);
         <h2 class="text-lg font-semibold">Manage games</h2>
         <p class="mt-1 text-sm text-gray-500">{{ games.length }} game{{ games.length === 1 ? '' : 's' }} in the catalogue</p>
       </div>
-      <button class="btn-primary" @click="creating = true">
-        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
-        Add custom game
-      </button>
+      <div class="flex flex-wrap items-center gap-2">
+        <button class="btn-ghost text-sm" :disabled="metadataRefreshStore.running" @click="showRefreshModal = true">
+          Refresh metadata
+        </button>
+        <button class="btn-primary" @click="creating = true">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+          Add custom game
+        </button>
+      </div>
     </div>
+
+    <p v-if="metadataRefreshStore.running" class="mb-3 rounded-lg bg-shelf-accent/10 p-2 text-sm text-shelf-accent">
+      Refreshing metadata…
+      <template v-if="metadataRefreshStore.total">{{ metadataRefreshStore.done }} / {{ metadataRefreshStore.total }}</template>
+    </p>
 
     <input v-model="search" class="input mb-4" placeholder="Search by title…" />
 
@@ -93,6 +134,7 @@ onMounted(load);
                 <div class="min-w-0">
                   <p class="truncate font-medium">{{ g.title }}</p>
                   <span v-if="g.custom" class="badge bg-shelf-accent/15 text-shelf-accent">Custom</span>
+                  <span v-if="g.missingMetadata" class="badge bg-amber-100 text-amber-800 dark:bg-amber-500/10 dark:text-amber-400">Missing info</span>
                 </div>
               </div>
             </td>
@@ -127,4 +169,32 @@ onMounted(load);
 
   <GameFormModal v-if="creating" :game="null" @close="creating = false" @saved="onSaved" />
   <GameFormModal v-if="editing" :game="editing" @close="editing = null" @saved="onSaved" />
+
+  <div v-if="showRefreshModal" class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4" @click.self="showRefreshModal = false">
+    <div class="card my-8 w-full max-w-sm p-6">
+      <div class="mb-4 flex items-center justify-between">
+        <h2 class="text-lg font-semibold">Refresh metadata</h2>
+        <button class="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-shelf-elevated" @click="showRefreshModal = false">
+          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+        </button>
+      </div>
+
+      <label class="mb-1 block text-sm text-gray-500">Mode</label>
+      <select v-model="refreshMode" class="input mb-3">
+        <option value="missing">Fill in missing metadata{{ missingCount ? ` (${missingCount})` : '' }}</option>
+        <option value="all">Refresh all metadata</option>
+      </select>
+
+      <p class="mb-5 text-xs text-gray-400">
+        {{ refreshMode === 'all'
+          ? "Re-fetches metadata and artwork for every game from IGDB, overwriting what's there now."
+          : "Only fills in blank fields (summary, genres, platforms, rating, artwork) from IGDB; anything already set is left untouched." }}
+      </p>
+
+      <div class="flex justify-end gap-3">
+        <button class="btn-ghost" @click="showRefreshModal = false">Cancel</button>
+        <button class="btn-primary" @click="startRefresh">Start</button>
+      </div>
+    </div>
+  </div>
 </template>
