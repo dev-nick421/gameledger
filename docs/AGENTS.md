@@ -169,7 +169,7 @@ Critical invariants:
 - `GET /api/games`, `GET /api/games/:igdbId`, `GET /api/games/:igdbId/download`.
 - `PATCH /api/games/:igdbId/match` reassign IGDB match (see below).
 - `GET /api/igdb/search?q=` admin-only, feeds the correction modal.
-- `POST /api/games/refresh-metadata` (issue #6, `services/metadataRefresh.js`,
+- `POST /api/games/refresh-metadata` (`services/metadataRefresh.js`,
   admin-only, 409 if one is already running): bulk-refreshes catalogued games
   from IGDB. `{ mode: "all" }` unconditionally overwrites metadata and
   wipes+redownloads artwork for every game; `{ mode: "missing" }` (default)
@@ -256,3 +256,14 @@ Historically each change was documented in `/docs` as
 `<change-number>-<brief-description>.md`. This file consolidates those notes; keep
 it current when you make a load-bearing decision rather than letting the rationale
 live only in commit messages.
+
+## Code comment style
+
+Not every change needs a comment, and not every comment needs a tracker
+reference. Reserve inline comments for a non-obvious invariant or a reason the
+code isn't the naive version; skip them when the code already reads clearly.
+Keep comments general — describe the constraint or the "why", not the ticket
+that prompted it. Issue/PR numbers rot (issues close, get renumbered, live in
+a tracker most readers of the code will never open); a comment tied to one
+reads as noise once that context is gone. If the origin matters, it belongs in
+the commit message or PR description, not baked into the source.
