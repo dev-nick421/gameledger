@@ -15,6 +15,20 @@ function makeGameFolder(root, name) {
   return dir;
 }
 
+// Builds a folder in gameledger's own output shape (artwork/ + data/*.zip)
+// without going through the scanner, simulating a library that was already
+// arranged by a previous instance (or by hand) before this database existed.
+function makeArrangedGameFolder(root, folderName) {
+  const dir = path.join(root, folderName);
+  const artworkDir = path.join(dir, 'artwork');
+  const dataDir = path.join(dir, 'data');
+  fs.mkdirSync(artworkDir, { recursive: true });
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.writeFileSync(path.join(artworkDir, 'cover.jpg'), 'fake cover bytes');
+  fs.writeFileSync(path.join(dataDir, `${folderName}.zip`), 'fake archive bytes');
+  return dir;
+}
+
 function stubIgdb() {
   nock('https://id.twitch.tv')
     .persist()
@@ -166,6 +180,57 @@ describe('scan pipeline', () => {
     expect(pending.status).toBe('failed');
     expect(pending.error).toBe('Cancelled');
     expect(runningJob.status).toBe('failed');
+  });
+
+  it('adopts an already-arranged folder instead of re-processing it, with no DB row for it', async () => {
+    // Simulates: library already arranged by gameledger (or by hand, same
+    // scheme), then scanned against a fresh/empty database  e.g. a reinstall.
+    const folderName = 'HELLDIVERS 2 - 2024 [250616]';
+    const arranged = makeArrangedGameFolder(libRoot, folderName);
+    await ctx.models.Library.create({ path: libRoot });
+
+    const { queued, adopted } = await ctx.scanner.scanAll();
+
+    expect(queued).toBe(0);
+    expect(adopted).toBe(1);
+
+    const game = await ctx.models.Game.findByPk(250616);
+    expect(game).toBeTruthy();
+    expect(game.status).toBe(GAME_STATUS.COMPLETED);
+    expect(game.gamePath).toBe(arranged);
+    expect(game.archivePath).toBe(path.join(arranged, 'data', `${folderName}.zip`));
+
+    // Nothing on disk was touched: no job was created, the folder (including
+    // its own artwork/data subfolders) was never compressed or deleted.
+    expect(fs.existsSync(arranged)).toBe(true);
+    expect(fs.existsSync(path.join(arranged, 'data', `${folderName}.zip`))).toBe(true);
+    const jobs = await ctx.models.Job.findAll();
+    expect(jobs.length).toBe(0);
+  });
+
+  it('does not re-adopt (or touch) a folder once it has a DB row', async () => {
+    const folderName = 'HELLDIVERS 2 - 2024 [250616]';
+    makeArrangedGameFolder(libRoot, folderName);
+    await ctx.models.Library.create({ path: libRoot });
+
+    await ctx.scanner.scanAll();
+    const { queued, adopted } = await ctx.scanner.scanAll();
+
+    expect(queued).toBe(0);
+    expect(adopted).toBe(0);
+  });
+
+  it('leaves an arranged folder alone (and logs a warning) when its IGDB ID cannot be read from the name', async () => {
+    const arranged = makeArrangedGameFolder(libRoot, 'Some Renamed Folder');
+    await ctx.models.Library.create({ path: libRoot });
+
+    const { queued, adopted } = await ctx.scanner.scanAll();
+
+    expect(queued).toBe(0);
+    expect(adopted).toBe(0);
+    expect(await ctx.models.Game.count()).toBe(0);
+    // Critically: it was never queued as raw input, so it was never touched.
+    expect(fs.existsSync(arranged)).toBe(true);
   });
 
   it('marks a job Failed and preserves the source when matching errors', async () => {

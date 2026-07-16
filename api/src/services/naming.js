@@ -31,6 +31,58 @@ export function generateFolderName(game, scheme) {
     .trim();
 }
 
+function escapeRegExp(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Turn a literal chunk of a scheme template into a regex fragment. Whitespace
+// is matched loosely (\s*) rather than verbatim because generateDisplayName
+// collapses/trims spacing around omitted tokens (e.g. a null release year),
+// so the on-disk name never has the template's exact spacing.
+function literalToPattern(literal) {
+  return literal
+    .split(/\s+/)
+    .map(escapeRegExp)
+    .join('\\s*');
+}
+
+// Reverses generateFolderName: given a name that was produced by this scheme,
+// recovers the embedded IGDB ID. This lets the scanner recognise a folder as
+// gameledger's own structured output even when the database has no record of
+// it (fresh install pointed at a previously-arranged library, a library
+// copied/restored from another instance, or a folder a user laid out by hand
+// in the same scheme). Returns null if the name doesn't fit the scheme.
+export function extractIgdbId(name, scheme) {
+  if (typeof name !== 'string' || !name.trim()) return null;
+  const tmpl = scheme ?? '<Game Name> - <Release Year> [<IGDB_ID>]';
+  const tokenRe = /<Game Name>|<Release Year>|<IGDB_ID>/g;
+  let pattern = '';
+  let lastIndex = 0;
+  let idGroup = -1;
+  let groupCount = 0;
+  let match;
+  while ((match = tokenRe.exec(tmpl))) {
+    pattern += literalToPattern(tmpl.slice(lastIndex, match.index));
+    groupCount += 1;
+    if (match[0] === '<IGDB_ID>') {
+      idGroup = groupCount;
+      pattern += '(\\d+)';
+    } else if (match[0] === '<Game Name>') {
+      pattern += '(.+?)';
+    } else {
+      pattern += '(\\d*)';
+    }
+    lastIndex = tokenRe.lastIndex;
+  }
+  pattern += literalToPattern(tmpl.slice(lastIndex));
+  if (idGroup < 0) return null;
+
+  const m = name.trim().match(new RegExp(`^\\s*${pattern}\\s*$`));
+  if (!m) return null;
+  const id = Number(m[idGroup]);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
 // A scheme must contain the <IGDB_ID> token. The id is the only token guaranteed
 // unique, so requiring it keeps every game folder/zip name collision-free.
 export function validateNamingScheme(scheme) {
@@ -50,5 +102,6 @@ export default {
   generateDisplayName,
   generateDownloadFilename,
   generateFolderName,
+  extractIgdbId,
   validateNamingScheme,
 };

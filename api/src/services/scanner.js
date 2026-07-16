@@ -1,9 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { GAME_STATUS, JOB_STATUS } from '../db/index.js';
-import { processArtwork } from './artwork.js';
+import { processArtwork, extractColors } from './artwork.js';
 import { createArchive } from './compression.js';
-import { generateFolderName } from './naming.js';
+import { generateFolderName, extractIgdbId } from './naming.js';
 
 // Derive a clean, searchable title from a folder/zip name:
 //   "HELLDIVERS.2.zip" -> "HELLDIVERS 2"
@@ -30,6 +30,41 @@ class CancelledError extends Error {
 
 // No-op logger so the scanner works in tests/contexts without one wired in.
 const NULL_LOGGER = { system: () => {}, scanner: () => {} };
+
+// gameledger's own structured output looks like:
+//   {gamePath}/artwork/...
+//   {gamePath}/data/{name}.zip
+// This shape only exists once a game has been fully processed, so any folder
+// matching it must never be treated as raw scan input  even if this database
+// has no record of it (fresh install, hand-arranged/restored library). Doing
+// so would re-match, re-compress the folder into itself, and then delete it
+// as a "source" once done.
+async function isStructuredGameFolder(fullPath) {
+  try {
+    const artworkStat = await fs.promises.stat(path.join(fullPath, 'artwork'));
+    if (!artworkStat.isDirectory()) return false;
+  } catch {
+    return false;
+  }
+  const dataFiles = await fs.promises.readdir(path.join(fullPath, 'data')).catch(() => []);
+  return dataFiles.some((f) => f.toLowerCase().endsWith('.zip'));
+}
+
+// Read back whatever artwork already exists on disk instead of re-downloading
+// it, so adopting an orphaned folder never touches the network for images.
+async function readArtworkAssets(artworkDir) {
+  const files = await fs.promises.readdir(artworkDir).catch(() => []);
+  const has = (name) => files.includes(name);
+  const screenshots = files
+    .filter((f) => /^screenshot_\d+\.jpg$/i.test(f))
+    .map((f) => ({ path: path.join(artworkDir, f), order: Number(f.match(/\d+/)[0]) }))
+    .sort((a, b) => a.order - b.order);
+  return {
+    coverPath: has('cover.jpg') ? path.join(artworkDir, 'cover.jpg') : null,
+    backgroundPath: has('background.jpg') ? path.join(artworkDir, 'background.jpg') : null,
+    screenshots,
+  };
+}
 
 export function createScanner({ models, igdb, broadcaster, logger = NULL_LOGGER }) {
   const { Library, Game, Screenshot, Job, Setting } = models;
@@ -76,8 +111,12 @@ export function createScanner({ models, igdb, broadcaster, logger = NULL_LOGGER 
 
   // Detect candidate inputs: top-level directories and *.zip files,
   // skipping entries that are already known game output folders or sources.
-  async function detectInputs(libraryPath) {
-    const namingScheme = await getNamingScheme();
+  // Also surfaces `structured`: directories that look like gameledger's own
+  // output (artwork/ + data/*.zip) but aren't in the excluded set  i.e. this
+  // database doesn't know about them yet. These are never queued as raw
+  // input; the caller adopts them instead (see adoptFolder).
+  async function detectInputs(libraryPath, namingSchemeArg) {
+    const namingScheme = namingSchemeArg ?? (await getNamingScheme());
     const knownGames = await Game.findAll({
       attributes: ['gamePath', 'sourcePath', 'igdbId', 'title', 'releaseYear', 'libraryPath'],
     });
@@ -105,18 +144,25 @@ export function createScanner({ models, igdb, broadcaster, logger = NULL_LOGGER 
     try {
       entries = await fs.promises.readdir(libraryPath, { withFileTypes: true });
     } catch {
-      return [];
+      return { inputs: [], structured: [] };
     }
     const inputs = [];
+    const structured = [];
     for (const entry of entries) {
       const full = path.join(libraryPath, entry.name);
       if (excluded.has(full)) continue;
-      if (entry.isDirectory()) inputs.push({ name: entry.name, path: full });
-      else if (entry.isFile() && entry.name.toLowerCase().endsWith('.zip')) {
+      if (entry.isDirectory()) {
+        // eslint-disable-next-line no-await-in-loop
+        if (await isStructuredGameFolder(full)) {
+          structured.push({ name: entry.name, path: full });
+        } else {
+          inputs.push({ name: entry.name, path: full });
+        }
+      } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.zip')) {
         inputs.push({ name: entry.name, path: full });
       }
     }
-    return inputs;
+    return { inputs, structured };
   }
 
   // Create or update the catalogued Game row + screenshots for a matched game.
@@ -155,6 +201,66 @@ export function createScanner({ models, igdb, broadcaster, logger = NULL_LOGGER 
         );
       }
     });
+  }
+
+  // Re-catalogue a folder gameledger recognises as its own completed output
+  // (artwork/ + data/*.zip) that this database has no row for. Trusts
+  // whatever is already on disk  the IGDB ID is read back out of the folder
+  // name (or, failing that, the archive name) via the active naming scheme,
+  // and existing artwork is reused as-is. Nothing on disk is moved, compressed,
+  // or deleted; this only ever adds/updates a Game row.
+  async function adoptFolder(entry, libraryPath, namingScheme) {
+    const dataDir = path.join(entry.path, 'data');
+    const artworkDir = path.join(entry.path, 'artwork');
+    const dataFiles = await fs.promises.readdir(dataDir).catch(() => []);
+    const zipName = dataFiles.find((f) => f.toLowerCase().endsWith('.zip'));
+    if (!zipName) return false;
+
+    const igdbId =
+      extractIgdbId(entry.name, namingScheme) ??
+      extractIgdbId(zipName.replace(/\.zip$/i, ''), namingScheme);
+    if (!igdbId) {
+      logger.system(
+        `"${entry.name}" looks like a gameledger game folder but its IGDB ID couldn't be read from the name skipped`,
+        { level: 'warn' },
+      );
+      return false;
+    }
+
+    const existing = await Game.findByPk(igdbId);
+    if (existing?.gamePath) {
+      logger.system(
+        `skipped adopting "${entry.name}": igdbId ${igdbId} is already tracked at ${existing.gamePath}`,
+        { level: 'warn' },
+      );
+      return false;
+    }
+
+    let data = null;
+    try {
+      data = await igdb.getGame(igdbId);
+    } catch {
+      data = null;
+    }
+
+    const { coverPath, backgroundPath, screenshots } = await readArtworkAssets(artworkDir);
+    let accentPrimary = null;
+    let accentSecondary = null;
+    if (coverPath) {
+      const colors = await extractColors(coverPath);
+      accentPrimary = colors.primary;
+      accentSecondary = colors.secondary;
+    }
+
+    await upsertGame(
+      igdbId,
+      data ?? {},
+      { coverPath, backgroundPath, screenshots, accentPrimary, accentSecondary },
+      entry.name,
+      { gamePath: entry.path, archivePath: path.join(dataDir, zipName), libraryPath },
+    );
+    logger.system(`adopted existing folder "${entry.name}" into the library`, { meta: { igdbId } });
+    return true;
   }
 
   async function processJob(job) {
@@ -287,10 +393,18 @@ export function createScanner({ models, igdb, broadcaster, logger = NULL_LOGGER 
     abortController = new AbortController();
     try {
       const libraries = await Library.findAll();
+      const namingScheme = await getNamingScheme();
       const queued = [];
+      let adopted = 0;
       for (const lib of libraries) {
-        const inputs = await detectInputs(lib.path);
+        // eslint-disable-next-line no-await-in-loop
+        const { inputs, structured } = await detectInputs(lib.path, namingScheme);
+        for (const folder of structured) {
+          // eslint-disable-next-line no-await-in-loop
+          if (await adoptFolder(folder, lib.path, namingScheme)) adopted += 1;
+        }
         for (const input of inputs) {
+          // eslint-disable-next-line no-await-in-loop
           const job = await Job.create({
             sourceName: input.name,
             sourcePath: input.path,
@@ -301,9 +415,11 @@ export function createScanner({ models, igdb, broadcaster, logger = NULL_LOGGER 
           queued.push(job);
         }
       }
-      logger.system(`scan found ${queued.length} new item${queued.length === 1 ? '' : 's'}`, {
-        meta: { found: queued.length },
-      });
+      logger.system(
+        `scan found ${queued.length} new item${queued.length === 1 ? '' : 's'}` +
+          (adopted ? `, adopted ${adopted} existing folder${adopted === 1 ? '' : 's'}` : ''),
+        { meta: { found: queued.length, adopted } },
+      );
       for (const job of queued) {
         if (cancelRequested) {
           // Cancelled before this job started mark it failed and move on so
@@ -317,7 +433,7 @@ export function createScanner({ models, igdb, broadcaster, logger = NULL_LOGGER 
         // eslint-disable-next-line no-await-in-loop
         await processJob(job);
       }
-      return { queued: queued.length };
+      return { queued: queued.length, adopted };
     } finally {
       running = false;
       cancelRequested = false;

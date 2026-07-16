@@ -101,6 +101,20 @@ Critical invariants:
   (route returns 409).
 - **`detectInputs` skips known `gamePath` folders** so the structured output
   directories are never re-queued as new inputs.
+- **Structured folders are recognised on sight, independent of the database.**
+  Any top-level directory containing `artwork/` + `data/*.zip` is gameledger's
+  own output shape, full stop it is never queued as raw scan input even when
+  no `Game` row references it (fresh DB after a reinstall, a library
+  arranged/copied outside a scan, hand-built folders following the naming
+  scheme). Treating it as raw input would re-match it, compress the folder
+  into a zip *inside itself*, then delete it as a "source" once done, silently
+  destroying an already-complete game. Instead `adoptFolder` re-derives the
+  `Game` row directly from disk: it recovers the IGDB ID from the folder/zip
+  name via `naming.extractIgdbId` (the scheme's reverse-parse), reuses the
+  existing artwork/archive paths as-is, and refreshes metadata from IGDB on a
+  best-effort basis (a title/artwork-only fallback if IGDB is unreachable).
+  Folders whose name doesn't fit the active scheme are left untouched and
+  logged as a warning rather than guessed at.
 - **On startup, any `RUNNING` jobs are reset to `FAILED`** so interrupted jobs
   become retryable instead of stuck forever.
 - Compression streams via `archiver` (safe for multi-GB inputs); existing zips are
