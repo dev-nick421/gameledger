@@ -109,12 +109,15 @@ Critical invariants:
   scheme). Treating it as raw input would re-match it, compress the folder
   into a zip *inside itself*, then delete it as a "source" once done, silently
   destroying an already-complete game. Instead `adoptFolder` re-derives the
-  `Game` row directly from disk: it recovers the IGDB ID from the folder/zip
-  name via `naming.extractIgdbId` (the scheme's reverse-parse), reuses the
-  existing artwork/archive paths as-is, and refreshes metadata from IGDB on a
-  best-effort basis (a title/artwork-only fallback if IGDB is unreachable).
-  Folders whose name doesn't fit the active scheme are left untouched and
-  logged as a warning rather than guessed at.
+  `Game` row directly from disk: it recovers title/year/IGDB ID from the
+  folder or zip name via `naming.parseFolderName` (the scheme's reverse-parse),
+  reuses the existing artwork/archive paths as-is, and refreshes metadata from
+  IGDB on a best-effort basis. If IGDB can't be reached (offline, credentials
+  not yet re-entered after a reinstall, rate-limited, ...) the title/year
+  parsed from the name are used as-is rather than falling back to the raw,
+  still scheme-shaped folder name (e.g. never "Foo - 2025 [12345]" as the
+  title). Folders whose name doesn't fit the active scheme are left untouched
+  and logged as a warning rather than guessed at.
 - **On startup, any `RUNNING` jobs are reset to `FAILED`** so interrupted jobs
   become retryable instead of stuck forever.
 - Compression streams via `archiver` (safe for multi-GB inputs); existing zips are

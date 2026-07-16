@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generateFolderName, extractIgdbId } from '../src/services/naming.js';
+import { generateFolderName, extractIgdbId, parseFolderName } from '../src/services/naming.js';
 
 const DEFAULT_SCHEME = '<Game Name> - <Release Year> [<IGDB_ID>]';
 
@@ -38,5 +38,25 @@ describe('extractIgdbId', () => {
   it('returns null for empty/garbage input', () => {
     expect(extractIgdbId('', DEFAULT_SCHEME)).toBeNull();
     expect(extractIgdbId('   ', DEFAULT_SCHEME)).toBeNull();
+  });
+});
+
+describe('parseFolderName', () => {
+  it('recovers the title and release year alongside the id', () => {
+    const folder = 'Clair Obscur Expedition 33 - 2025 [305152]';
+    expect(parseFolderName(folder, DEFAULT_SCHEME)).toEqual({
+      title: 'Clair Obscur Expedition 33',
+      releaseYear: 2025,
+      igdbId: 305152,
+    });
+  });
+
+  it('leaves releaseYear null when the folder was generated without one', () => {
+    const folder = generateFolderName({ title: 'HELLDIVERS 2', releaseYear: null, igdbId: 250616 }, DEFAULT_SCHEME);
+    expect(parseFolderName(folder, DEFAULT_SCHEME)).toEqual({
+      title: 'HELLDIVERS 2',
+      releaseYear: null,
+      igdbId: 250616,
+    });
   });
 });

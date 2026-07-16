@@ -220,6 +220,29 @@ describe('scan pipeline', () => {
     expect(adopted).toBe(0);
   });
 
+  it('adopts with a title parsed from the folder name (not the raw scheme-shaped string) when IGDB is unreachable', async () => {
+    nock.cleanAll();
+    // No IGDB stubs at all -> getGame() throws, exercising the offline fallback.
+    nock('https://id.twitch.tv')
+      .persist()
+      .post('/oauth2/token')
+      .query(true)
+      .reply(500, 'boom');
+
+    const folderName = 'Clair Obscur Expedition 33 - 2025 [305152]';
+    makeArrangedGameFolder(libRoot, folderName);
+    await ctx.models.Library.create({ path: libRoot });
+
+    const { adopted } = await ctx.scanner.scanAll();
+    expect(adopted).toBe(1);
+
+    const game = await ctx.models.Game.findByPk(305152);
+    expect(game).toBeTruthy();
+    // Must be the parsed game name, not the whole "Title - Year [Id]" string.
+    expect(game.title).toBe('Clair Obscur Expedition 33');
+    expect(game.releaseYear).toBe(2025);
+  });
+
   it('leaves an arranged folder alone (and logs a warning) when its IGDB ID cannot be read from the name', async () => {
     const arranged = makeArrangedGameFolder(libRoot, 'Some Renamed Folder');
     await ctx.models.Library.create({ path: libRoot });

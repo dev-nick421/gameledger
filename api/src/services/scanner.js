@@ -3,7 +3,7 @@ import path from 'node:path';
 import { GAME_STATUS, JOB_STATUS } from '../db/index.js';
 import { processArtwork, extractColors } from './artwork.js';
 import { createArchive } from './compression.js';
-import { generateFolderName, extractIgdbId } from './naming.js';
+import { generateFolderName, parseFolderName } from './naming.js';
 
 // Derive a clean, searchable title from a folder/zip name:
 //   "HELLDIVERS.2.zip" -> "HELLDIVERS 2"
@@ -216,16 +216,17 @@ export function createScanner({ models, igdb, broadcaster, logger = NULL_LOGGER 
     const zipName = dataFiles.find((f) => f.toLowerCase().endsWith('.zip'));
     if (!zipName) return false;
 
-    const igdbId =
-      extractIgdbId(entry.name, namingScheme) ??
-      extractIgdbId(zipName.replace(/\.zip$/i, ''), namingScheme);
-    if (!igdbId) {
+    const parsed =
+      parseFolderName(entry.name, namingScheme) ??
+      parseFolderName(zipName.replace(/\.zip$/i, ''), namingScheme);
+    if (!parsed) {
       logger.system(
         `"${entry.name}" looks like a gameledger game folder but its IGDB ID couldn't be read from the name skipped`,
         { level: 'warn' },
       );
       return false;
     }
+    const igdbId = parsed.igdbId;
 
     const existing = await Game.findByPk(igdbId);
     if (existing?.gamePath) {
@@ -242,6 +243,16 @@ export function createScanner({ models, igdb, broadcaster, logger = NULL_LOGGER 
     } catch {
       data = null;
     }
+    // IGDB unreachable (offline, credentials not yet re-entered after a
+    // reinstall, rate-limited, ...): fall back to what the folder name itself
+    // encodes rather than cleanSourceName-ing the whole, still scheme-shaped
+    // name (which would leave the year/id baked into the title).
+    if (!data) {
+      data = {
+        name: parsed.title ?? cleanSourceName(entry.name),
+        first_release_date: parsed.releaseYear ? Date.UTC(parsed.releaseYear, 0, 1) / 1000 : null,
+      };
+    }
 
     const { coverPath, backgroundPath, screenshots } = await readArtworkAssets(artworkDir);
     let accentPrimary = null;
@@ -254,7 +265,7 @@ export function createScanner({ models, igdb, broadcaster, logger = NULL_LOGGER 
 
     await upsertGame(
       igdbId,
-      data ?? {},
+      data,
       { coverPath, backgroundPath, screenshots, accentPrimary, accentSecondary },
       entry.name,
       { gamePath: entry.path, archivePath: path.join(dataDir, zipName), libraryPath },
