@@ -16,7 +16,7 @@ import { logRoutes } from './routes/logs.js';
  * out of this factory lets tests inject an in-memory DB and fake services and
  * exercise the whole stack over HTTP.
  */
-export function createApp({ models, igdb, scanner, scheduler, logger, namingSchemeProvider }) {
+export function createApp({ models, igdb, scanner, scheduler, metadataRefresher, logger, namingSchemeProvider }) {
   const app = express();
   app.use(cors());
   app.use(express.json());
@@ -26,7 +26,7 @@ export function createApp({ models, igdb, scanner, scheduler, logger, namingSche
   app.use('/api', settingsRoutes({ models, igdb, scheduler, logger }));
   app.use('/api', libraryRoutes({ models, logger }));
   app.use('/api', scanRoutes({ models, scanner, logger }));
-  app.use('/api', gameRoutes({ models, igdb, namingSchemeProvider, logger }));
+  app.use('/api', gameRoutes({ models, igdb, namingSchemeProvider, metadataRefresher, logger }));
   app.use('/api', igdbRoutes({ igdb }));
   app.use('/api', artworkRoutes({ models }));
   app.use('/api', logRoutes({ models, logger }));

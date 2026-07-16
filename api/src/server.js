@@ -4,6 +4,7 @@ import { createLogger } from './services/logger.js';
 import { createIgdbClient } from './services/igdb.js';
 import { createScanner } from './services/scanner.js';
 import { createScheduler } from './services/scheduler.js';
+import { createMetadataRefresher } from './services/metadataRefresh.js';
 import { createApp } from './app.js';
 
 /**
@@ -28,6 +29,7 @@ export async function buildServer({ storage } = {}) {
   const igdb = createIgdbClient({ models });
   const scanner = createScanner({ models, igdb, broadcaster, logger });
   const scheduler = createScheduler({ scanner, logger });
+  const metadataRefresher = createMetadataRefresher({ models, igdb, broadcaster, logger });
 
   const namingSchemeProvider = async () => {
     const [setting] = await models.Setting.findOrCreate({
@@ -37,9 +39,9 @@ export async function buildServer({ storage } = {}) {
     return setting.namingScheme;
   };
 
-  const app = createApp({ models, igdb, scanner, scheduler, logger, namingSchemeProvider });
+  const app = createApp({ models, igdb, scanner, scheduler, metadataRefresher, logger, namingSchemeProvider });
 
-  return { app, sequelize, models, broadcaster, logger, scanner, scheduler };
+  return { app, sequelize, models, broadcaster, logger, scanner, scheduler, metadataRefresher };
 }
 
 export default buildServer;

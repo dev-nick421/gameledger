@@ -169,6 +169,20 @@ Critical invariants:
 - `GET /api/games`, `GET /api/games/:igdbId`, `GET /api/games/:igdbId/download`.
 - `PATCH /api/games/:igdbId/match` reassign IGDB match (see below).
 - `GET /api/igdb/search?q=` admin-only, feeds the correction modal.
+- `POST /api/games/refresh-metadata` (issue #6, `services/metadataRefresh.js`,
+  admin-only, 409 if one is already running): bulk-refreshes catalogued games
+  from IGDB. `{ mode: "all" }` unconditionally overwrites metadata and
+  wipes+redownloads artwork for every game; `{ mode: "missing" }` (default)
+  only touches games with a blank field (summary/genres/platforms/rating/
+  releaseYear/cover  the same fields the detail page shows as "—"), filling in
+  just the blanks. Custom games are never touched. Fire-and-forget like `/scan`
+  (202, progress + a `metadataRefresh` summary over `/ws`); use "all" to fix a
+  field that's wrong-but-present (e.g. a title that got mangled upstream of
+  IGDB)  "missing" mode won't touch it since it isn't blank. Never
+  moves/renames `gamePath`/`archivePath`: per the naming-system invariant above,
+  a metadata correction is a cheap update, not a relocation. `GET
+  /api/games/manage` includes a `missingMetadata` flag per game so the admin UI
+  can show which ones "Find missing metadata" would affect.
 
 ### Download endpoint
 
