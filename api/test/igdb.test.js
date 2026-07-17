@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createDatabase } from '../src/db/index.js';
-import { createIgdbClient, similarity } from '../src/services/igdb.js';
+import { createIgdbClient, similarity, pickTrailer } from '../src/services/igdb.js';
 import { config } from '../src/config.js';
 import { mockToken, mockGames, cleanAll } from './igdbMock.js';
 
@@ -99,5 +99,24 @@ describe('similarity', () => {
   });
   it('scores unrelated titles low', () => {
     expect(similarity('Halo', 'Cyberpunk 2077')).toBeLessThan(0.3);
+  });
+});
+
+describe('pickTrailer', () => {
+  it('picks a video explicitly named as a trailer', () => {
+    const id = pickTrailer([
+      { name: 'Gameplay walkthrough', video_id: 'aaaaaaaaaaa' },
+      { name: 'Official Launch Trailer', video_id: 'bbbbbbbbbbb' },
+    ]);
+    expect(id).toBe('bbbbbbbbbbb');
+  });
+
+  it('returns null when nothing is confidently a trailer', () => {
+    expect(pickTrailer([{ name: 'Developer Diary', video_id: 'ccccccccccc' }])).toBeNull();
+  });
+
+  it('returns null for missing/empty video lists', () => {
+    expect(pickTrailer(undefined)).toBeNull();
+    expect(pickTrailer([])).toBeNull();
   });
 });

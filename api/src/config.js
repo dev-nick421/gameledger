@@ -24,6 +24,11 @@ export const config = {
   igdbClientId: process.env.IGDB_CLIENT_ID ?? null,
   igdbClientSecret: process.env.IGDB_CLIENT_SECRET ?? null,
 
+  // SteamGridDB: optional, art-only provider (issue #8). Supplements/replaces
+  // cover & background art independently of whether IGDB is configured.
+  steamgridApiKey: process.env.STEAMGRID_API_KEY ?? null,
+  steamgridTimeoutMs: Number(process.env.STEAMGRID_TIMEOUT_MS ?? 15_000),
+
   // IGDB auto-match: results scoring below this similarity are left Unmatched.
   matchThreshold: Number(process.env.MATCH_THRESHOLD ?? 0.6),
 

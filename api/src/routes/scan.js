@@ -54,6 +54,20 @@ export function scanRoutes({ models, scanner, logger }) {
     return res.status(202).json({ retrying: true });
   });
 
+  // Dismiss a failed job so it stops cluttering the queue forever. Only
+  // failed jobs can be cleared this way; retry is still the path for
+  // running/pending ones.
+  router.delete('/queue/:jobId', requireAuth, async (req, res) => {
+    const job = await Job.findByPk(req.params.jobId);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    if (job.status !== JOB_STATUS.FAILED) {
+      return res.status(409).json({ error: 'Only failed jobs can be cleared' });
+    }
+    await job.destroy();
+    logger?.user(`cleared failed job "${job.sourceName}"`, { meta: { jobId: job.id } });
+    res.json({ ok: true });
+  });
+
   // Cancel the active scan: aborts the in-flight game (downloads/compression),
   // discards its partial folder, and clears every pending job. Source files are
   // left untouched. This is the escape hatch for a stuck scan.

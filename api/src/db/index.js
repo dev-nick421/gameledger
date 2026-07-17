@@ -64,6 +64,8 @@ export function createDatabase({ storage } = {}) {
       igdbClientSecret: { type: DataTypes.STRING, allowNull: true },
       igdbToken: { type: DataTypes.STRING, allowNull: true },
       igdbTokenExpiresAt: { type: DataTypes.DATE, allowNull: true },
+      // SteamGridDB: a single static API key, no OAuth dance needed.
+      steamgridApiKey: { type: DataTypes.STRING, allowNull: true },
       namingScheme: {
         type: DataTypes.STRING,
         allowNull: false,
@@ -144,6 +146,9 @@ export function createDatabase({ storage } = {}) {
       backgroundPath: { type: DataTypes.STRING, allowNull: true },
       accentColorPrimary: { type: DataTypes.STRING, allowNull: true },
       accentColorSecondary: { type: DataTypes.STRING, allowNull: true },
+      // YouTube video id for the trailer shown on the detail page. Populated
+      // from a confidently-matched IGDB video, or set by hand in the admin UI.
+      trailerVideoId: { type: DataTypes.STRING, allowNull: true },
       status: {
         type: DataTypes.STRING,
         allowNull: false,

@@ -17,6 +17,10 @@ services:
       PORT: 3000
       DATABASE_PATH: /app/data/gameledger.sqlite
       MATCH_THRESHOLD: ${MATCH_THRESHOLD:-0.6}
+      # Optional: preconfigure providers without touching the admin UI.
+      IGDB_CLIENT_ID: ${IGDB_CLIENT_ID:-}
+      IGDB_CLIENT_SECRET: ${IGDB_CLIENT_SECRET:-}
+      STEAMGRID_API_KEY: ${STEAMGRID_API_KEY:-}
     volumes:
       - api-data:/app/data
       # Mount your game library (read-write so processed sources can be removed).

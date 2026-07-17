@@ -9,8 +9,10 @@ import { isValidSchedule } from '../services/scheduler.js';
 function serialize(setting) {
   const clientId = setting.igdbClientId || config.igdbClientId;
   const clientSecret = setting.igdbClientSecret || config.igdbClientSecret;
+  const steamgridApiKey = setting.steamgridApiKey || config.steamgridApiKey;
   return {
     igdbConfigured: Boolean(clientId && clientSecret),
+    steamgridConfigured: Boolean(steamgridApiKey),
     namingScheme: setting.namingScheme,
     scanSchedule: setting.scanSchedule,
     refreshSchedule: setting.refreshSchedule,
@@ -45,7 +47,7 @@ export function normaliseSections(stored) {
   return out;
 }
 
-export function settingsRoutes({ models, igdb, scheduler, logger }) {
+export function settingsRoutes({ models, igdb, steamgrid, scheduler, logger }) {
   const { Setting } = models;
   const router = Router();
 
@@ -74,6 +76,7 @@ export function settingsRoutes({ models, igdb, scheduler, logger }) {
     const {
       igdbClientId,
       igdbClientSecret,
+      steamgridApiKey,
       namingScheme,
       scanSchedule,
       refreshSchedule,
@@ -102,6 +105,7 @@ export function settingsRoutes({ models, igdb, scheduler, logger }) {
 
     if (igdbClientId !== undefined) setting.igdbClientId = igdbClientId || null;
     if (igdbClientSecret !== undefined) setting.igdbClientSecret = igdbClientSecret || null;
+    if (steamgridApiKey !== undefined) setting.steamgridApiKey = steamgridApiKey || null;
     if (showRecentlyAdded !== undefined) setting.showRecentlyAdded = Boolean(showRecentlyAdded);
 
     if (librarySections !== undefined) {
@@ -151,6 +155,16 @@ export function settingsRoutes({ models, igdb, scheduler, logger }) {
       res.json({ ok: true, sample: results[0]?.name ?? null });
     } catch (err) {
       res.status(400).json({ ok: false, error: err?.message ?? 'IGDB request failed' });
+    }
+  });
+
+  // Verify SteamGridDB credentials end-to-end: run a probe search.
+  router.post('/settings/test-steamgrid', requireAuth, async (req, res) => {
+    try {
+      const result = await steamgrid.testConnection();
+      res.json(result);
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err?.message ?? 'SteamGridDB request failed' });
     }
   });
 

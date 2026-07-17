@@ -21,6 +21,26 @@ const view = ref(localStorage.getItem('gs_view') || 'grid');
 const correcting = ref(null);
 const editing = ref(null);
 
+// Front-page sort (issue #12): each option maps to a sortBy/sortDir pair sent
+// straight through to GET /games, which sorts before pagination.
+const SORT_OPTIONS = [
+  { value: 'default', label: 'Recently updated', sortBy: null, sortDir: null },
+  { value: 'date-desc', label: 'Release date (newest)', sortBy: 'releaseYear', sortDir: 'desc' },
+  { value: 'date-asc', label: 'Release date (oldest)', sortBy: 'releaseYear', sortDir: 'asc' },
+  { value: 'name-asc', label: 'Name (A-Z)', sortBy: 'title', sortDir: 'asc' },
+  { value: 'name-desc', label: 'Name (Z-A)', sortBy: 'title', sortDir: 'desc' },
+  { value: 'platform-asc', label: 'Platform (A-Z)', sortBy: 'platform', sortDir: 'asc' },
+  { value: 'platform-desc', label: 'Platform (Z-A)', sortBy: 'platform', sortDir: 'desc' },
+  { value: 'genre-asc', label: 'Genre (A-Z)', sortBy: 'genre', sortDir: 'asc' },
+  { value: 'genre-desc', label: 'Genre (Z-A)', sortBy: 'genre', sortDir: 'desc' },
+];
+const sortOption = ref(localStorage.getItem('gs_sort') || 'default');
+function setSort(v) {
+  sortOption.value = v;
+  localStorage.setItem('gs_sort', v);
+  load();
+}
+
 // Section config (ordered { id, visible }), hydrated from public settings
 const sections = ref([]);
 
@@ -70,7 +90,13 @@ function onEditManually() {
 async function load() {
   loading.value = true;
   try {
-    const { data } = await client.get('/games', { params: { limit: 100 } });
+    const chosen = SORT_OPTIONS.find((o) => o.value === sortOption.value);
+    const params = { limit: 100 };
+    if (chosen?.sortBy) {
+      params.sortBy = chosen.sortBy;
+      params.sortDir = chosen.sortDir;
+    }
+    const { data } = await client.get('/games', { params });
     items.value = data.items;
     total.value = data.total;
     error.value = null;
@@ -223,38 +249,49 @@ const isEmpty = computed(() => !loading.value && items.value.length === 0);
         <h1 class="text-2xl font-bold">Library</h1>
         <p class="text-sm text-gray-500">{{ total }} title{{ total === 1 ? '' : 's' }}</p>
       </div>
-      <!-- View switcher: icons only (issue #18) -->
-      <div class="flex gap-1 rounded-lg bg-gray-100 p-1 dark:bg-shelf-elevated">
-        <button
-          v-for="v in VIEWS"
-          :key="v.id"
-          class="rounded-md p-1.5 transition"
-          :class="view === v.id ? 'bg-white text-shelf-accent shadow dark:bg-shelf-surface' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
-          :title="v.label"
-          :aria-label="v.label"
-          @click="setView(v.id)"
+      <div class="flex items-center gap-3">
+        <!-- Sort dropdown (issue #12) -->
+        <select
+          class="input !w-auto py-1.5 text-sm"
+          aria-label="Sort library"
+          :value="sortOption"
+          @change="setSort($event.target.value)"
         >
-          <!-- grid -->
-          <svg v-if="v.id === 'grid'" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="3" width="7" height="7" rx="1" />
-            <rect x="14" y="3" width="7" height="7" rx="1" />
-            <rect x="3" y="14" width="7" height="7" rx="1" />
-            <rect x="14" y="14" width="7" height="7" rx="1" />
-          </svg>
-          <!-- list -->
-          <svg v-else-if="v.id === 'list'" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="4" width="5" height="5" rx="1" />
-            <rect x="3" y="15" width="5" height="5" rx="1" />
-            <line x1="11" y1="6.5" x2="21" y2="6.5" />
-            <line x1="11" y1="17.5" x2="21" y2="17.5" />
-          </svg>
-          <!-- plain -->
-          <svg v-else class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="3" y1="6" x2="21" y2="6" />
-            <line x1="3" y1="12" x2="21" y2="12" />
-            <line x1="3" y1="18" x2="21" y2="18" />
-          </svg>
-        </button>
+          <option v-for="o in SORT_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+        </select>
+        <!-- View switcher: icons only (issue #18) -->
+        <div class="flex gap-1 rounded-lg bg-gray-100 p-1 dark:bg-shelf-elevated">
+          <button
+            v-for="v in VIEWS"
+            :key="v.id"
+            class="rounded-md p-1.5 transition"
+            :class="view === v.id ? 'bg-white text-shelf-accent shadow dark:bg-shelf-surface' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+            :title="v.label"
+            :aria-label="v.label"
+            @click="setView(v.id)"
+          >
+            <!-- grid -->
+            <svg v-if="v.id === 'grid'" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="7" height="7" rx="1" />
+              <rect x="14" y="3" width="7" height="7" rx="1" />
+              <rect x="3" y="14" width="7" height="7" rx="1" />
+              <rect x="14" y="14" width="7" height="7" rx="1" />
+            </svg>
+            <!-- list -->
+            <svg v-else-if="v.id === 'list'" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="4" width="5" height="5" rx="1" />
+              <rect x="3" y="15" width="5" height="5" rx="1" />
+              <line x1="11" y1="6.5" x2="21" y2="6.5" />
+              <line x1="11" y1="17.5" x2="21" y2="17.5" />
+            </svg>
+            <!-- plain -->
+            <svg v-else class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+          </button>
+        </div>
       </div>
     </div>
 

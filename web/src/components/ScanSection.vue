@@ -70,6 +70,16 @@ async function retry(jobId) {
   }
 }
 
+async function clearFailed(jobId) {
+  try {
+    await client.delete(`/queue/${jobId}`);
+    showToast('Cleared.', 'ok');
+    await loadQueue();
+  } catch {
+    showToast('Failed to clear the job.', 'warn');
+  }
+}
+
 // Refresh queue counts whenever a job event arrives.
 let refreshTimer = null;
 watch(
@@ -193,13 +203,25 @@ onMounted(loadQueue);
         <ul class="space-y-2 text-sm">
           <li v-for="j in queue.failed" :key="j.id" class="flex items-center justify-between gap-2">
             <span class="min-w-0 flex-1 truncate" :title="j.error">{{ j.sourceName }}</span>
-            <button class="inline-flex shrink-0 items-center gap-1 text-shelf-accent hover:underline" @click="retry(j.id)">
-              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M23 4v6h-6M1 20v-6h6" />
-                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-              </svg>
-              Retry
-            </button>
+            <span class="flex shrink-0 items-center gap-2">
+              <button class="inline-flex items-center gap-1 text-shelf-accent hover:underline" @click="retry(j.id)">
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M23 4v6h-6M1 20v-6h6" />
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                </svg>
+                Retry
+              </button>
+              <button
+                class="rounded p-0.5 text-gray-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
+                title="Clear this failed entry"
+                aria-label="Clear failed entry"
+                @click="clearFailed(j.id)"
+              >
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </span>
           </li>
         </ul>
       </div>

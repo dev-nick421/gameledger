@@ -44,6 +44,40 @@ describe('scan & queue API', () => {
     expect(res.status).toBe(404);
   });
 
+  it('clears a failed job', async () => {
+    const job = await ctx.models.Job.create({
+      sourceName: 'Broken Game',
+      sourcePath: '/tmp/broken',
+      status: 'failed',
+      stage: 'Failed',
+      error: 'kaboom',
+    });
+    const res = await request(ctx.app).delete(`/api/queue/${job.id}`).set(authHeader());
+    expect(res.status).toBe(200);
+    expect(await ctx.models.Job.findByPk(job.id)).toBeNull();
+  });
+
+  it('404s clearing an unknown job', async () => {
+    const res = await request(ctx.app).delete('/api/queue/9999').set(authHeader());
+    expect(res.status).toBe(404);
+  });
+
+  it('refuses to clear a non-failed job', async () => {
+    const job = await ctx.models.Job.create({
+      sourceName: 'In Progress',
+      sourcePath: '/tmp/inprogress',
+      status: 'pending',
+      stage: 'Pending',
+    });
+    const res = await request(ctx.app).delete(`/api/queue/${job.id}`).set(authHeader());
+    expect(res.status).toBe(409);
+  });
+
+  it('requires auth to clear a job', async () => {
+    const res = await request(ctx.app).delete('/api/queue/1');
+    expect(res.status).toBe(401);
+  });
+
   it('requires auth to trigger a scan', async () => {
     const res = await request(ctx.app).post('/api/scan');
     expect(res.status).toBe(401);

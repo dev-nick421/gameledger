@@ -24,7 +24,16 @@ const form = reactive({
   genres: '',
   platforms: '',
   rating: '',
+  trailerVideoId: '',
 });
+
+// "Search on YouTube" (issue #2): opens a search for the game's title in a new
+// tab so the user can find and paste in a trailer link manually.
+const youtubeSearchUrl = computed(() =>
+  form.title.trim()
+    ? `https://www.youtube.com/results?search_query=${encodeURIComponent(`${form.title.trim()} trailer`)}`
+    : null,
+);
 
 const cover = ref(null);
 const background = ref(null);
@@ -82,6 +91,7 @@ onMounted(async () => {
       form.genres = (data.genres ?? []).join(', ');
       form.platforms = (data.platforms ?? []).join(', ');
       form.rating = data.rating ?? '';
+      form.trailerVideoId = data.trailerVideoId ?? '';
       existingCover.value = data.coverUrl;
       if (flagMissing) {
         missingFields.releaseYear = data.releaseYear == null;
@@ -122,6 +132,7 @@ async function submit() {
   fd.append('genres', form.genres);
   fd.append('platforms', form.platforms);
   fd.append('rating', form.rating === '' ? '' : String(form.rating));
+  fd.append('trailerVideoId', form.trailerVideoId.trim());
   if (cover.value) fd.append('cover', cover.value);
   if (background.value) fd.append('background', background.value);
   for (const s of screenshots.value) fd.append('screenshots', s);
@@ -228,6 +239,23 @@ async function submit() {
               <svg v-if="missingFields.summary" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" title="Missing from IGDB"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
             </label>
             <textarea v-model="form.summary" rows="3" class="input" :class="{ 'ring-1 ring-amber-400 dark:ring-amber-500/60': missingFields.summary }" placeholder="Short description…"></textarea>
+          </div>
+
+          <div>
+            <label class="mb-1 block text-sm text-gray-500">Trailer (YouTube URL or video ID)</label>
+            <div class="flex gap-2">
+              <input v-model="form.trailerVideoId" class="input" placeholder="https://youtu.be/…" />
+              <a
+                v-if="youtubeSearchUrl"
+                :href="youtubeSearchUrl"
+                target="_blank"
+                rel="noopener"
+                class="btn-ghost shrink-0 whitespace-nowrap text-sm"
+                title="Search YouTube for this game's trailer"
+              >
+                Search YouTube
+              </a>
+            </div>
           </div>
 
           <div class="grid grid-cols-2 gap-3">

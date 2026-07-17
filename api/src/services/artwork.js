@@ -39,8 +39,12 @@ export async function extractColors(imagePath) {
  * artwork/ subfolder inside the game's library folder.
  * Individual download failures are swallowed so one missing image never
  * fails the whole pipeline.
+ *
+ * `steamgrid`, when passed, supplements art IGDB doesn't have: if IGDB has no
+ * cover/background for this title, its SteamGridDB equivalent is tried before
+ * giving up. Works whether or not IGDB itself is configured/matched (issue #8).
  */
-export async function processArtwork(igdbId, igdbData, artworkDir, signal) {
+export async function processArtwork(igdbId, igdbData, artworkDir, signal, steamgrid) {
   await fs.promises.mkdir(artworkDir, { recursive: true });
 
   const result = {
@@ -61,6 +65,19 @@ export async function processArtwork(igdbId, igdbData, artworkDir, signal) {
       result.accentSecondary = colors.secondary;
     }
   }
+  if (!result.coverPath && steamgrid && igdbData.name) {
+    const url = await steamgrid.findCoverUrl(igdbData.name);
+    if (url) {
+      const dest = path.join(artworkDir, 'cover.jpg');
+      const ok = await tryDownload(url, dest, signal);
+      if (ok) {
+        result.coverPath = dest;
+        const colors = await extractColors(dest);
+        result.accentPrimary = colors.primary;
+        result.accentSecondary = colors.secondary;
+      }
+    }
+  }
 
   // Prefer a dedicated artwork as the background; fall back to first screenshot.
   const bgImageId = igdbData.artworks?.[0]?.image_id ?? igdbData.screenshots?.[0]?.image_id;
@@ -68,6 +85,14 @@ export async function processArtwork(igdbId, igdbData, artworkDir, signal) {
     const dest = path.join(artworkDir, 'background.jpg');
     const ok = await tryDownload(imageUrl(bgImageId, 't_1080p'), dest, signal);
     if (ok) result.backgroundPath = dest;
+  }
+  if (!result.backgroundPath && steamgrid && igdbData.name) {
+    const url = await steamgrid.findHeroUrl(igdbData.name);
+    if (url) {
+      const dest = path.join(artworkDir, 'background.jpg');
+      const ok = await tryDownload(url, dest, signal);
+      if (ok) result.backgroundPath = dest;
+    }
   }
 
   if (Array.isArray(igdbData.screenshots)) {

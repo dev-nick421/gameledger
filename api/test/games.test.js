@@ -79,6 +79,42 @@ describe('games API', () => {
     expect(res.body.items.some((i) => i.title === 'Broken Game')).toBe(false);
   });
 
+  it('sorts games by release date, name, platform and genre', async () => {
+    await ctx.models.Game.create({
+      igdbId: -100,
+      title: 'Alpha Game',
+      status: 'Completed',
+      custom: true,
+      archivePath: '/tmp/alpha.zip',
+      releaseYear: 2010,
+      platforms: ['Xbox'],
+      genres: ['Puzzle'],
+    });
+    await ctx.models.Game.create({
+      igdbId: -101,
+      title: 'Zeta Game',
+      status: 'Completed',
+      custom: true,
+      archivePath: '/tmp/zeta.zip',
+      releaseYear: 2020,
+      platforms: ['Switch'],
+      genres: ['Action'],
+    });
+
+    const byDateDesc = await request(ctx.app).get('/api/games').query({ sortBy: 'releaseYear', sortDir: 'desc' });
+    const idsDesc = byDateDesc.body.items.map((i) => i.igdbId);
+    expect(idsDesc.indexOf(-101)).toBeLessThan(idsDesc.indexOf(-100));
+
+    const byNameAsc = await request(ctx.app).get('/api/games').query({ sortBy: 'title', sortDir: 'asc' });
+    const idsNameAsc = byNameAsc.body.items.map((i) => i.igdbId);
+    expect(idsNameAsc.indexOf(-100)).toBeLessThan(idsNameAsc.indexOf(-101));
+
+    const byGenreAsc = await request(ctx.app).get('/api/games').query({ sortBy: 'genre', sortDir: 'asc' });
+    const idsGenreAsc = byGenreAsc.body.items.map((i) => i.igdbId);
+    // "Action" < "Puzzle" alphabetically
+    expect(idsGenreAsc.indexOf(-101)).toBeLessThan(idsGenreAsc.indexOf(-100));
+  });
+
   it('returns full detail for a game', async () => {
     const res = await request(ctx.app).get('/api/games/250616');
     expect(res.status).toBe(200);
@@ -176,6 +212,32 @@ describe('games API', () => {
     const del = await request(ctx.app).delete(`/api/games/${id}`).set(authHeader());
     expect(del.status).toBe(200);
     expect(await ctx.models.Game.findByPk(id)).toBeNull();
+  });
+
+  it('sets and clears a trailer, accepting a full YouTube URL or a bare id', async () => {
+    const created = await request(ctx.app)
+      .post('/api/games')
+      .set(authHeader())
+      .field('title', 'Trailer Test Game');
+    const id = created.body.igdbId;
+
+    const withUrl = await request(ctx.app)
+      .put(`/api/games/${id}`)
+      .set(authHeader())
+      .field('trailerVideoId', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+    expect(withUrl.status).toBe(200);
+    let detail = await request(ctx.app).get(`/api/games/${id}`);
+    expect(detail.body.trailerVideoId).toBe('dQw4w9WgXcQ');
+
+    // Garbage input is ignored rather than clobbering the existing value.
+    await request(ctx.app).put(`/api/games/${id}`).set(authHeader()).field('trailerVideoId', 'not a url');
+    detail = await request(ctx.app).get(`/api/games/${id}`);
+    expect(detail.body.trailerVideoId).toBe('dQw4w9WgXcQ');
+
+    // Empty string clears it.
+    await request(ctx.app).put(`/api/games/${id}`).set(authHeader()).field('trailerVideoId', '');
+    detail = await request(ctx.app).get(`/api/games/${id}`);
+    expect(detail.body.trailerVideoId).toBeNull();
   });
 
   it('rejects a custom game without a title', async () => {

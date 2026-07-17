@@ -10,7 +10,33 @@ import { generateDisplayName, generateDownloadFilename, generateFolderName } fro
 import { processArtwork } from '../services/artwork.js';
 import { createArchive } from '../services/compression.js';
 import { cleanSourceName } from '../services/scanner.js';
+import { pickTrailer } from '../services/igdb.js';
 import { isMissingMetadata } from '../services/metadataRefresh.js';
+
+// Accepts a bare 11-char YouTube video id or a full watch/share/embed URL.
+// Returns null for anything else so a mistyped value never gets stored as if
+// it were a valid id.
+export function parseYoutubeId(value) {
+  const s = String(value ?? '').trim();
+  if (!s) return null;
+  if (/^[\w-]{11}$/.test(s)) return s;
+  try {
+    const url = new URL(s);
+    if (/(^|\.)youtu\.be$/.test(url.hostname)) {
+      const id = url.pathname.slice(1);
+      return /^[\w-]{11}$/.test(id) ? id : null;
+    }
+    if (/(^|\.)youtube\.com$/.test(url.hostname)) {
+      const v = url.searchParams.get('v');
+      if (v && /^[\w-]{11}$/.test(v)) return v;
+      const m = url.pathname.match(/\/embed\/([\w-]{11})/);
+      if (m) return m[1];
+    }
+  } catch {
+    /* not a URL */
+  }
+  return null;
+}
 
 // In-memory upload buffering for hand-authored artwork
 const upload = multer({
@@ -58,7 +84,7 @@ function serializeJobCard(job) {
   };
 }
 
-export function gameRoutes({ models, igdb, namingSchemeProvider, metadataRefresher, logger }) {
+export function gameRoutes({ models, igdb, namingSchemeProvider, metadataRefresher, logger, steamgrid }) {
   const { Game, Screenshot, Job, Setting, Library } = models;
   const router = Router();
 
@@ -101,6 +127,29 @@ export function gameRoutes({ models, igdb, namingSchemeProvider, metadataRefresh
       .filter(Boolean);
   }
 
+  // Sort keys the front-page dropdown can request. Compares on the raw Game
+  // rows (before serialisation) so genres/platforms are available even though
+  // the card itself doesn't expose them.
+  const SORT_COMPARATORS = {
+    releaseYear: (g) => g.releaseYear ?? -Infinity,
+    title: (g) => (g.title ?? '').toLowerCase(),
+    platform: (g) => (g.platforms?.[0] ?? '').toLowerCase(),
+    genre: (g) => (g.genres?.[0] ?? '').toLowerCase(),
+  };
+
+  function sortGames(games, sortBy, sortDir) {
+    const pick = SORT_COMPARATORS[sortBy];
+    if (!pick) return games;
+    const dir = sortDir === 'desc' ? -1 : 1;
+    return [...games].sort((a, b) => {
+      const av = pick(a);
+      const bv = pick(b);
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return 0;
+    });
+  }
+
   // Library grid feed: in-flight job cards first, then catalogued games.
   // Completed jobs are omitted (the Game record is the source of truth)
   // Failures remain visible in the Scanning queue.
@@ -114,10 +163,11 @@ export function gameRoutes({ models, igdb, namingSchemeProvider, metadataRefresh
       order: [['updatedAt', 'DESC']],
     });
     // Exclude completed games with no archivePath -> these are broken/pre-migration. "Refresh Library" will clean them up.
-    const games = await Game.findAll({
+    let games = await Game.findAll({
       where: { [Op.or]: [{ status: { [Op.ne]: GAME_STATUS.COMPLETED } }, { archivePath: { [Op.ne]: null } }] },
       order: [['updatedAt', 'DESC']],
     });
+    games = sortGames(games, req.query.sortBy, req.query.sortDir);
 
     let items = [...jobs.map(serializeJobCard), ...games.map((g) => serializeCard(g, namingScheme))];
     if (req.query.status) items = items.filter((i) => i.status === req.query.status);
@@ -313,6 +363,7 @@ export function gameRoutes({ models, igdb, namingSchemeProvider, metadataRefresh
       backgroundUrl: backgroundUrl(game),
       accentColorPrimary: game.accentColorPrimary,
       accentColorSecondary: game.accentColorSecondary,
+      trailerVideoId: game.trailerVideoId,
       screenshots,
     });
   });
@@ -407,7 +458,7 @@ export function gameRoutes({ models, igdb, namingSchemeProvider, metadataRefresh
     await fs.promises.mkdir(newArtworkDir, { recursive: true });
     await fs.promises.mkdir(newDataDir, { recursive: true });
 
-    const art = await processArtwork(newId, data, newArtworkDir);
+    const art = await processArtwork(newId, data, newArtworkDir, undefined, steamgrid);
 
     const archiveName = `${folderName}.zip`;
     const newArchivePath = path.join(newDataDir, archiveName);
@@ -454,6 +505,7 @@ export function gameRoutes({ models, igdb, namingSchemeProvider, metadataRefresh
       backgroundPath: art.backgroundPath,
       accentColorPrimary: art.accentPrimary,
       accentColorSecondary: art.accentSecondary,
+      trailerVideoId: pickTrailer(data.videos),
       status: GAME_STATUS.COMPLETED,
       sourceName: game.sourceName,
       sourcePath: null,
@@ -486,6 +538,14 @@ export function gameRoutes({ models, igdb, namingSchemeProvider, metadataRefresh
     if (body.rating !== undefined) {
       const r = Number(body.rating);
       target.rating = body.rating !== '' && Number.isFinite(r) ? Math.round(r) : null;
+    }
+    if (body.trailerVideoId !== undefined) {
+      if (body.trailerVideoId === '') {
+        target.trailerVideoId = null;
+      } else {
+        const parsed = parseYoutubeId(body.trailerVideoId);
+        if (parsed) target.trailerVideoId = parsed;
+      }
     }
   }
 

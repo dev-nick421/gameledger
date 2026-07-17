@@ -2,6 +2,7 @@ import { createDatabase, syncSchema } from './db/index.js';
 import { createBroadcaster } from './ws/broadcaster.js';
 import { createLogger } from './services/logger.js';
 import { createIgdbClient } from './services/igdb.js';
+import { createSteamGridClient } from './services/steamgrid.js';
 import { createScanner } from './services/scanner.js';
 import { createScheduler } from './services/scheduler.js';
 import { createMetadataRefresher } from './services/metadataRefresh.js';
@@ -27,9 +28,10 @@ export async function buildServer({ storage } = {}) {
   const broadcaster = createBroadcaster();
   const logger = createLogger({ models });
   const igdb = createIgdbClient({ models });
-  const scanner = createScanner({ models, igdb, broadcaster, logger });
+  const steamgrid = createSteamGridClient({ models });
+  const scanner = createScanner({ models, igdb, broadcaster, logger, steamgrid });
   const scheduler = createScheduler({ scanner, logger });
-  const metadataRefresher = createMetadataRefresher({ models, igdb, broadcaster, logger });
+  const metadataRefresher = createMetadataRefresher({ models, igdb, broadcaster, logger, steamgrid });
 
   const namingSchemeProvider = async () => {
     const [setting] = await models.Setting.findOrCreate({
@@ -39,7 +41,16 @@ export async function buildServer({ storage } = {}) {
     return setting.namingScheme;
   };
 
-  const app = createApp({ models, igdb, scanner, scheduler, metadataRefresher, logger, namingSchemeProvider });
+  const app = createApp({
+    models,
+    igdb,
+    steamgrid,
+    scanner,
+    scheduler,
+    metadataRefresher,
+    logger,
+    namingSchemeProvider,
+  });
 
   return { app, sequelize, models, broadcaster, logger, scanner, scheduler, metadataRefresher };
 }

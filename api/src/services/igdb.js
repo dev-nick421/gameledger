@@ -46,6 +46,16 @@ export function imageUrl(imageId, size = 't_cover_big') {
   return `${IGDB_IMAGE_BASE}/${size}/${imageId}.jpg`;
 }
 
+// Pick a trailer from IGDB's videos list, but only when confident: a video
+// explicitly named "trailer" (IGDB doesn't tag video kind, so the name is all
+// we have). Ambiguous or empty results leave the game with no auto-selected
+// trailer rather than guessing the wrong one (issue #2).
+export function pickTrailer(videos) {
+  if (!Array.isArray(videos) || !videos.length) return null;
+  const trailer = videos.find((v) => /trailer/i.test(v?.name ?? ''));
+  return trailer?.video_id || null;
+}
+
 export function createIgdbClient({ models }) {
   const { Setting } = models;
 
@@ -109,7 +119,7 @@ export function createIgdbClient({ models }) {
 
   const GAME_FIELDS =
     'fields name, summary, first_release_date, rating, genres.name, platforms.name, ' +
-    'cover.image_id, screenshots.image_id, artworks.image_id;';
+    'cover.image_id, screenshots.image_id, artworks.image_id, videos.name, videos.video_id;';
 
   async function search(query, limit = 10) {
     const safe = String(query).replace(/"/g, '');

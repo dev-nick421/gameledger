@@ -4,14 +4,14 @@ import { RouterView } from 'vue-router';
 import { useSettingsStore } from '../stores/settings.js';
 
 // Settings shell: a sidebar of categories + a routed content pane. Each category
-// (Scanning, IGDB, Library, Paths) is its own nested route so it behaves like a
-// real page/tab Scanning included (issue #15).
+// (Scanning, Providers, Library, Paths) is its own nested route so it behaves
+// like a real page/tab Scanning included (issue #15).
 const settings = useSettingsStore();
 
 const sections = [
   { name: 'settings-scanning', label: 'Scanning', icon: 'scan' },
   { name: 'settings-scheduler', label: 'Scheduler', icon: 'clock' },
-  { name: 'settings-igdb', label: 'IGDB', icon: 'key' },
+  { name: 'settings-providers', label: 'Providers', icon: 'plug' },
   { name: 'settings-library', label: 'Library', icon: 'sliders' },
   { name: 'settings-games', label: 'Manage Games', icon: 'gamepad' },
   { name: 'settings-paths', label: 'Paths', icon: 'folder' },
@@ -39,8 +39,8 @@ onMounted(() => settings.load());
               <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" />
               <line x1="7" y1="12" x2="17" y2="12" />
             </template>
-            <template v-else-if="s.icon === 'key'">
-              <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.778-7.778zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3" />
+            <template v-else-if="s.icon === 'plug'">
+              <path d="M9 2v6M15 2v6M6 8h12l-1 5a5 5 0 0 1-5 4h0a5 5 0 0 1-5-4L6 8z" /><path d="M12 17v5" />
             </template>
             <template v-else-if="s.icon === 'sliders'">
               <line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" />

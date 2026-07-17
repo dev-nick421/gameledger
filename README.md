@@ -81,7 +81,7 @@ That's it. Open **http://localhost:8080** in your browser. (Change the port with
 #### First-run walkthrough
 
 1. Click **Login** (top right) and sign in with your `ADMIN_PASSWORD`.
-2. Go to **Settings → IGDB** and paste your free [IGDB API credentials](https://dev.twitch.tv/console/apps) —> needed to fetch cover art and metadata.
+2. Go to **Settings → Providers** and paste your free [IGDB API credentials](https://dev.twitch.tv/console/apps) —> needed to fetch cover art and metadata. Optionally add a [SteamGridDB](https://www.steamgriddb.com/profile/preferences/api) key on the same page for fallback art.
 3. Go to **Settings → Paths**, add your library path (`/games` will be your `LIBRARY_PATH` inside the container), and save.
 4. Open the **Scan** dashboard and hit **Scan Library**. Watch the progress roll in.
 5. Head back to the **Library** and enjoy your collection. 🎉
@@ -101,6 +101,7 @@ Everything is configured through `.env` (see [`.env.example`](.env.example)):
 | `IMAGE_TAG`                             |          | `latest`  | Pin a specific release, e.g. `v1.0.0`.                                        |
 | `MATCH_THRESHOLD`                       |          | `0.6`     | IGDB auto-match confidence (0–1); below this, games are left _Unmatched_.     |
 | `IGDB_CLIENT_ID` / `IGDB_CLIENT_SECRET` |          |         | Optional; can also be entered in the UI after first run.                      |
+| `STEAMGRID_API_KEY`                     |          |         | Optional SteamGridDB key for fallback cover/background art; also settable in the UI (Providers). |
 
 The API runs only inside the Docker network nginx in the web container proxies
 `/api` and `/ws` to it, so there's no extra port to expose or secure.

@@ -18,10 +18,12 @@ const routes = [
         component: () => import('../views/settings/ScanningSettings.vue'),
       },
       {
-        path: 'igdb',
-        name: 'settings-igdb',
-        component: () => import('../views/settings/IgdbSettings.vue'),
+        path: 'providers',
+        name: 'settings-providers',
+        component: () => import('../views/settings/ProvidersSettings.vue'),
       },
+      // Old bookmarks/links to the pre-#8 IGDB-only settings page.
+      { path: 'igdb', redirect: { name: 'settings-providers' } },
       {
         path: 'library',
         name: 'settings-library',

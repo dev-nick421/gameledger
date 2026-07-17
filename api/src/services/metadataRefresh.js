@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { GAME_STATUS } from '../db/index.js';
+import { pickTrailer } from './igdb.js';
 import { processArtwork } from './artwork.js';
 
 // No-op logger so the refresher works in tests/contexts without one wired in.
@@ -37,7 +38,7 @@ export function isMissingMetadata(game) {
  *               fills in the blanks  present, non-empty fields and existing
  *               artwork are left alone.
  */
-export function createMetadataRefresher({ models, igdb, broadcaster, logger = NULL_LOGGER }) {
+export function createMetadataRefresher({ models, igdb, broadcaster, logger = NULL_LOGGER, steamgrid }) {
   const { Game, Screenshot } = models;
   let running = false;
   const isRunning = () => running;
@@ -63,12 +64,14 @@ export function createMetadataRefresher({ models, igdb, broadcaster, logger = NU
       fields.genres = (data.genres ?? []).map((g) => g.name);
       fields.platforms = (data.platforms ?? []).map((p) => p.name);
       fields.rating = data.rating != null ? Math.round(data.rating) : null;
+      fields.trailerVideoId = pickTrailer(data.videos);
     } else {
       if (game.releaseYear == null) fields.releaseYear = releaseYear;
       if (!game.summary) fields.summary = data.summary ?? null;
       if (!game.genres?.length) fields.genres = (data.genres ?? []).map((g) => g.name);
       if (!game.platforms?.length) fields.platforms = (data.platforms ?? []).map((p) => p.name);
       if (game.rating == null) fields.rating = data.rating != null ? Math.round(data.rating) : null;
+      if (!game.trailerVideoId) fields.trailerVideoId = pickTrailer(data.videos);
     }
 
     const artworkDir = game.coverPath
@@ -81,7 +84,7 @@ export function createMetadataRefresher({ models, igdb, broadcaster, logger = NU
       // "delete all artwork and metadata": wipe first so stale assets from a
       // previous IGDB match never linger alongside the fresh set.
       await fs.promises.rm(artworkDir, { recursive: true, force: true }).catch(() => {});
-      const art = await processArtwork(game.igdbId, data, artworkDir);
+      const art = await processArtwork(game.igdbId, data, artworkDir, undefined, steamgrid);
       fields.coverPath = art.coverPath;
       fields.backgroundPath = art.backgroundPath;
       fields.accentColorPrimary = art.accentPrimary;
@@ -94,7 +97,7 @@ export function createMetadataRefresher({ models, igdb, broadcaster, logger = NU
       }
     } else if (artworkDir && !game.coverPath) {
       // "missing" mode: only fill in artwork that's absent entirely.
-      const art = await processArtwork(game.igdbId, data, artworkDir);
+      const art = await processArtwork(game.igdbId, data, artworkDir, undefined, steamgrid);
       if (art.coverPath) {
         fields.coverPath = art.coverPath;
         fields.accentColorPrimary = art.accentPrimary;

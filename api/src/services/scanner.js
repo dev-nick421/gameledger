@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { GAME_STATUS, JOB_STATUS } from '../db/index.js';
+import { pickTrailer } from './igdb.js';
 import { processArtwork, extractColors } from './artwork.js';
 import { createArchive } from './compression.js';
 import { generateFolderName, parseFolderName } from './naming.js';
@@ -66,7 +67,7 @@ async function readArtworkAssets(artworkDir) {
   };
 }
 
-export function createScanner({ models, igdb, broadcaster, logger = NULL_LOGGER }) {
+export function createScanner({ models, igdb, broadcaster, logger = NULL_LOGGER, steamgrid }) {
   const { Library, Game, Screenshot, Job, Setting } = models;
   // Sequelize instance needed for transactions.
   const { sequelize } = Game;
@@ -183,6 +184,7 @@ export function createScanner({ models, igdb, broadcaster, logger = NULL_LOGGER 
       backgroundPath: art.backgroundPath,
       accentColorPrimary: art.accentPrimary,
       accentColorSecondary: art.accentSecondary,
+      trailerVideoId: pickTrailer(data.videos),
       status: GAME_STATUS.COMPLETED,
       sourceName,
       sourcePath: null,
@@ -333,7 +335,7 @@ export function createScanner({ models, igdb, broadcaster, logger = NULL_LOGGER 
       createdGamePath = gamePath;
 
       throwIfCancelled();
-      const art = await processArtwork(match.id, data, artworkDir, abortController?.signal);
+      const art = await processArtwork(match.id, data, artworkDir, abortController?.signal, steamgrid);
 
       throwIfCancelled();
       await setStage(job, GAME_STATUS.COMPRESSING, 60);

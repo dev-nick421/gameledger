@@ -24,6 +24,22 @@ const filtered = computed(() => {
 
 const missingCount = computed(() => games.value.filter((g) => g.missingMetadata).length);
 
+// Explains each status a catalogued game can be in, surfaced as a tooltip
+// since the table only has room for the short label itself.
+const STATUS_TOOLTIPS = {
+  Completed: 'Fully catalogued: metadata, artwork and archive are ready to download.',
+  Unmatched: 'No confident IGDB match was found. Edit this game to correct/confirm its match.',
+  Pending: 'Queued for scanning; not yet processed.',
+  Scanning: 'Currently being scanned.',
+  Matching: 'Looking up a matching title on IGDB.',
+  'Fetching Metadata': 'Downloading metadata and artwork from IGDB.',
+  Compressing: 'Compressing game files into the archive.',
+  Failed: 'Processing failed. See Library scanning for details.',
+};
+function statusTooltip(status) {
+  return STATUS_TOOLTIPS[status] || status;
+}
+
 async function load() {
   loading.value = true;
   try {
@@ -114,11 +130,11 @@ onMounted(load);
       <table class="w-full text-sm">
         <thead class="text-left text-gray-500">
           <tr class="border-b border-gray-100 dark:border-shelf-border">
-            <th class="py-2 pr-2">Game</th>
-            <th class="px-2">Year</th>
-            <th class="px-2">Status</th>
-            <th class="px-2">Downloads</th>
-            <th class="px-2 text-right">Actions</th>
+            <th class="py-2 pr-2" title="Cover, title and any badges for this entry">Game</th>
+            <th class="px-2" title="Release year, if known">Year</th>
+            <th class="px-2" title="Where this game is in the cataloguing pipeline">Status</th>
+            <th class="px-2" title="Number of times this game has been downloaded">Downloads</th>
+            <th class="px-2 text-right" title="Edit or delete this game">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -133,14 +149,14 @@ onMounted(load);
                 <div v-else class="h-10 w-7 shrink-0 rounded bg-gray-200 dark:bg-shelf-elevated"></div>
                 <div class="min-w-0">
                   <p class="truncate font-medium">{{ g.title }}</p>
-                  <span v-if="g.custom" class="badge bg-shelf-accent/15 text-shelf-accent">Custom</span>
-                  <span v-if="g.missingMetadata" class="badge bg-amber-100 text-amber-800 dark:bg-amber-500/10 dark:text-amber-400">Missing info</span>
+                  <span v-if="g.custom" class="badge bg-shelf-accent/15 text-shelf-accent" title="Hand-added game not backed by IGDB">Custom</span>
+                  <span v-if="g.missingMetadata" class="badge bg-amber-100 text-amber-800 dark:bg-amber-500/10 dark:text-amber-400" title="One or more fields (summary, genres, platforms, rating, cover) are blank">Missing info</span>
                 </div>
               </div>
             </td>
             <td class="px-2 text-gray-500">{{ g.releaseYear || '—' }}</td>
             <td class="px-2">
-              <span class="text-gray-500">{{ g.status }}</span>
+              <span class="text-gray-500" :title="statusTooltip(g.status)">{{ g.status }}</span>
             </td>
             <td class="px-2 text-gray-500">{{ g.downloadCount }}</td>
             <td class="px-2">

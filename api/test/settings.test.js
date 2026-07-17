@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
 import request from 'supertest';
+import nock from 'nock';
 import { makeServer, authHeader } from './helpers.js';
 import { mockToken, mockGames, cleanAll } from './igdbMock.js';
 
@@ -118,6 +119,36 @@ describe('settings', () => {
   it('reports an error when IGDB credentials are missing', async () => {
     const fresh = await makeServer();
     const res = await request(fresh.app).post('/api/settings/test-igdb').set(authHeader());
+    expect(res.status).toBe(400);
+    expect(res.body.ok).toBe(false);
+    await fresh.sequelize.close();
+  });
+
+  it('saves a SteamGridDB key without exposing it, and reports it configured', async () => {
+    await request(ctx.app).put('/api/settings').set(authHeader()).send({ steamgridApiKey: 'sg-key' });
+
+    const res = await request(ctx.app).get('/api/settings').set(authHeader());
+    expect(res.status).toBe(200);
+    expect(res.body.steamgridConfigured).toBe(true);
+    expect(res.body.steamgridApiKey).toBeUndefined();
+  });
+
+  it('verifies SteamGridDB credentials end-to-end', async () => {
+    await request(ctx.app).put('/api/settings').set(authHeader()).send({ steamgridApiKey: 'sg-key' });
+
+    nock('https://www.steamgriddb.com')
+      .get('/api/v2/search/autocomplete/Half-Life')
+      .reply(200, { success: true, data: [{ id: 1, name: 'Half-Life' }] });
+
+    const res = await request(ctx.app).post('/api/settings/test-steamgrid').set(authHeader());
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.sample).toBe('Half-Life');
+  });
+
+  it('reports an error when SteamGridDB credentials are missing', async () => {
+    const fresh = await makeServer();
+    const res = await request(fresh.app).post('/api/settings/test-steamgrid').set(authHeader());
     expect(res.status).toBe(400);
     expect(res.body.ok).toBe(false);
     await fresh.sequelize.close();

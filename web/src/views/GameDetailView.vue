@@ -36,6 +36,10 @@ const heroStyle = computed(() => {
 const downloadUrl = computed(() =>
   game.value ? `/api/games/${game.value.igdbId}/download` : '#',
 );
+
+const trailerEmbedUrl = computed(() =>
+  game.value?.trailerVideoId ? `https://www.youtube-nocookie.com/embed/${game.value.trailerVideoId}` : null,
+);
 </script>
 
 <template>
@@ -83,6 +87,20 @@ const downloadUrl = computed(() =>
         <p class="whitespace-pre-line leading-relaxed text-gray-700 dark:text-gray-300">
           {{ game.summary || 'No description available.' }}
         </p>
+
+        <div v-if="trailerEmbedUrl" class="mt-8">
+          <h2 class="mb-2 text-lg font-semibold">Trailer</h2>
+          <div class="aspect-video overflow-hidden rounded-xl">
+            <iframe
+              class="h-full w-full"
+              :src="trailerEmbedUrl"
+              title="Game trailer"
+              frameborder="0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowfullscreen
+            ></iframe>
+          </div>
+        </div>
 
         <div class="mt-8">
           <ScreenshotCarousel :shots="game.screenshots" />
