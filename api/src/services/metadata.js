@@ -61,12 +61,13 @@ export function createMetadataService({ igdb, steamgrid }) {
     };
   }
 
-  // Never fails the caller: missing art just means IGDB's (or none) is used.
-  async function steamGridArtwork(steamGridId) {
-    const [cover, hero] = await Promise.all([
-      steamgrid.getCover(steamGridId).catch(() => null),
-      steamgrid.getHero(steamGridId).catch(() => null),
-    ]);
+  // "No art" (an empty result) is fine either way. A failed lookup only
+  // degrades to IGDB art when enriching an IGDB game; for a SteamGridDB-only
+  // game the art is the data, so the error propagates and callers treat the
+  // game as failed (an "all" refresh would otherwise wipe its artwork).
+  async function steamGridArtwork(steamGridId, { strict = false } = {}) {
+    const lookup = (fn) => (strict ? fn(steamGridId) : fn(steamGridId).catch(() => null));
+    const [cover, hero] = await Promise.all([lookup(steamgrid.getCover), lookup(steamgrid.getHero)]);
     return { coverUrl: cover?.url ?? null, backgroundUrl: hero?.url ?? null };
   }
 
@@ -104,7 +105,7 @@ export function createMetadataService({ igdb, steamgrid }) {
       const steamGridId = fromSteamGridKey(id);
       const game = await steamgrid.getGame(steamGridId);
       if (!game) return null;
-      return { ...fromSteamGrid(game), ...(await steamGridArtwork(steamGridId)) };
+      return { ...fromSteamGrid(game), ...(await steamGridArtwork(steamGridId, { strict: true })) };
     }
 
     const data = await igdb.getGame(id);

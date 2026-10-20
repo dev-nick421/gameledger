@@ -233,6 +233,21 @@ describe('games API', () => {
     await request(ctx.app).put('/api/games/250616').set(authHeader()).field('trailerUrl', '');
     detail = await request(ctx.app).get('/api/games/250616');
     expect(detail.body.trailerYoutubeId).toBeNull();
+    // Removed on purpose, so "Fill in missing metadata" won't put one back.
+    expect((await ctx.models.Game.findByPk(250616)).trailerYoutubeId).toBe('');
+  });
+
+  it('leaves the trailer alone when an edit doesn\'t mention it', async () => {
+    await request(ctx.app).put('/api/games/250616').set(authHeader()).field('summary', 'Spread democracy.');
+    expect((await ctx.models.Game.findByPk(250616)).trailerYoutubeId).toBeNull();
+  });
+
+  it('reports no provider for an unmatched game in the management table', async () => {
+    await ctx.models.Game.create({ igdbId: -77, title: 'mystery folder', status: 'Unmatched', sourcePath: '/tmp/x' });
+    const res = await request(ctx.app).get('/api/games/manage').set(authHeader());
+    const row = res.body.items.find((i) => i.igdbId === -77);
+    expect(row.provider).toBeNull();
+    expect(row.custom).toBe(false);
   });
 
   it('publishes downloadable games in the catalog', async () => {

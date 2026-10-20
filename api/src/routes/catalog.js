@@ -49,7 +49,7 @@ export function catalogRoutes({ models, namingSchemeProvider }) {
           screenshotUrls: (game.screenshots ?? [])
             .sort((a, b) => a.order - b.order)
             .map((s) => `/api/artwork/${id}/screenshot_${s.order}.jpg`),
-          trailerYoutubeId: game.trailerYoutubeId ?? null,
+          trailerYoutubeId: game.trailerYoutubeId || null,
           detailUrl: `/game/${id}`,
           downloadUrl: `/api/games/${id}/download`,
           fileName: generateDownloadFilename(game, namingScheme),

@@ -36,12 +36,13 @@ export function missingMetadataFields(game) {
   return missing;
 }
 
-// What "missing" mode refreshes: blank detail-page fields, plus games with no
-// trailer yet. A trailer isn't part of isMissingMetadata (plenty of games
-// legitimately have none), but libraries catalogued before trailers existed
-// should pick theirs up without a full "all" refresh.
+// What "missing" mode refreshes: blank detail-page fields, plus games whose
+// trailer was never looked up. A trailer isn't part of isMissingMetadata
+// (plenty of games legitimately have none), but libraries catalogued before
+// trailers existed should pick theirs up without a full "all" refresh. One
+// removed by hand ('') stays removed.
 export function needsMetadataRefresh(game) {
-  return isMissingMetadata(game) || !game.trailerYoutubeId;
+  return isMissingMetadata(game) || game.trailerYoutubeId == null;
 }
 
 /**
@@ -90,7 +91,7 @@ export function createMetadataRefresher({ models, metadata, broadcaster, logger 
       if (!game.genres?.length && meta.genres.length) fields.genres = meta.genres;
       if (!game.platforms?.length && meta.platforms.length) fields.platforms = meta.platforms;
       if (game.rating == null && meta.rating != null) fields.rating = meta.rating;
-      if (!game.trailerYoutubeId && meta.trailerYoutubeId) fields.trailerYoutubeId = meta.trailerYoutubeId;
+      if (game.trailerYoutubeId == null && meta.trailerYoutubeId) fields.trailerYoutubeId = meta.trailerYoutubeId;
     }
 
     const artworkDir = game.coverPath

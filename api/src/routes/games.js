@@ -154,7 +154,7 @@ export function gameRoutes({ models, metadata, namingSchemeProvider, metadataRef
         releaseYear: g.releaseYear,
         status: g.status,
         custom: Boolean(g.custom),
-        provider: providerOf(g.igdbId),
+        provider: g.status === GAME_STATUS.UNMATCHED ? null : providerOf(g.igdbId),
         downloadCount: g.downloadCount ?? 0,
         hasArchive: Boolean(g.archivePath),
         hasTrailer: Boolean(g.trailerYoutubeId),
@@ -332,9 +332,9 @@ export function gameRoutes({ models, metadata, namingSchemeProvider, metadataRef
       rating: game.rating,
       status: game.status,
       custom: Boolean(game.custom),
-      provider: providerOf(game.igdbId),
+      provider: game.status === GAME_STATUS.UNMATCHED ? null : providerOf(game.igdbId),
       providerId: providerIdOf(game.igdbId),
-      trailerYoutubeId: game.trailerYoutubeId ?? null,
+      trailerYoutubeId: game.trailerYoutubeId || null,
       downloadable: game.status === GAME_STATUS.COMPLETED && Boolean(game.archivePath),
       displayName: generateDisplayName(game, namingScheme),
       coverUrl: coverUrl(game),
@@ -509,7 +509,10 @@ export function gameRoutes({ models, metadata, namingSchemeProvider, metadataRef
       const r = Number(body.rating);
       target.rating = body.rating !== '' && Number.isFinite(r) ? Math.round(r) : null;
     }
-    if (body.trailerUrl !== undefined) target.trailerYoutubeId = parseYoutubeId(body.trailerUrl);
+    if (body.trailerUrl !== undefined) {
+      const text = String(body.trailerUrl).trim();
+      target.trailerYoutubeId = text ? parseYoutubeId(text) : '';
+    }
   }
 
   // Save cover/background/screenshot uploads into the game's artwork dir and

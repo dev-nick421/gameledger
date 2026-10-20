@@ -147,7 +147,8 @@ export function createDatabase({ storage } = {}) {
       accentColorPrimary: { type: DataTypes.STRING, allowNull: true },
       accentColorSecondary: { type: DataTypes.STRING, allowNull: true },
       // YouTube video id of the game's trailer: auto-picked from IGDB when it
-      // has a confident match, or set by hand from Manage Games.
+      // has a confident match, or set by hand from Manage Games. null = never
+      // set (refreshes may fill it); '' = removed by hand (refreshes leave it).
       trailerYoutubeId: { type: DataTypes.STRING, allowNull: true },
       status: {
         type: DataTypes.STRING,

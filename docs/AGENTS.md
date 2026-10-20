@@ -155,7 +155,12 @@ from whichever providers are configured and always returns IGDB-shaped data:
 `metadataFields(data)` is the single place provider data becomes Game columns,
 including `trailerYoutubeId` (via `pickTrailer`, which only accepts videos named
 like a trailer and rejects teasers/walkthroughs/interviews; no confident match
-means no trailer). The SteamGridDB client reads settings with `findByPk`, not
+means no trailer). `trailerYoutubeId` is tri-state: `null` = never set (the
+"missing" refresh may fill it), `''` = removed by hand (refreshes leave it alone),
+otherwise a video id; serialise `''` as null. For SteamGridDB-only games a failed
+artwork *lookup* propagates as an error (the art is their only data, and an
+"all" refresh wipes the artwork folder first); only IGDB-enrichment lookups
+degrade silently. The SteamGridDB client reads settings with `findByPk`, not
 `findOrCreate`: its cover/hero lookups run concurrently and SQLite can't run
 `findOrCreate`'s transactions side by side.
 

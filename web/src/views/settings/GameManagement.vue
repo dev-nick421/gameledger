@@ -44,8 +44,9 @@ const SOURCES = {
   igdb: { label: 'IGDB', help: 'Details and artwork come from IGDB.' },
   steamgriddb: { label: 'SteamGridDB', help: 'Matched through SteamGridDB: title, year and artwork only.' },
   custom: { label: 'Custom', help: 'Added by hand. Metadata refreshes never change it.' },
+  none: { label: '—', help: 'Not matched to a provider yet. Fix the match from the library, or edit it to add details by hand.' },
 };
-const sourceInfo = (g) => (g.custom ? SOURCES.custom : SOURCES[g.provider] ?? SOURCES.custom);
+const sourceInfo = (g) => (g.custom ? SOURCES.custom : SOURCES[g.provider] ?? SOURCES.none);
 
 const COLUMN_HELP = {
   game: 'Title as shown in the library. Badges flag hand-added games and missing details.',

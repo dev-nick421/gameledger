@@ -187,6 +187,7 @@ function onSaved() {
         <section v-if="game.trailerYoutubeId" ref="trailerSection">
           <h2 class="section-title mb-3">Trailer</h2>
           <TrailerPlayer
+            :key="game.trailerYoutubeId"
             ref="player"
             :video-id="game.trailerYoutubeId"
             :poster="game.backgroundUrl || game.coverUrl"
@@ -233,7 +234,7 @@ function onSaved() {
           <div>
             <dt class="text-xs font-medium uppercase tracking-wide text-gray-400">Metadata</dt>
             <dd class="mt-1">
-              {{ PROVIDER_LABELS[game.provider] ?? 'Unknown' }}<span v-if="game.providerId" class="text-gray-400"> · #{{ game.providerId }}</span>
+              {{ PROVIDER_LABELS[game.provider] ?? 'Not matched yet' }}<span v-if="game.providerId" class="text-gray-400"> · #{{ game.providerId }}</span>
             </dd>
           </div>
           <div v-if="game.downloadable">

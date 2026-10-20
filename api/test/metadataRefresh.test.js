@@ -180,6 +180,23 @@ describe('metadata refresher', () => {
     expect(game.summary).toBe('already there');
   });
 
+  it('"missing" mode leaves a trailer the admin removed on purpose', async () => {
+    await ctx.models.Game.create(
+      makeGameRow(libRoot, {
+        releaseYear: 2024,
+        summary: 'already there',
+        genres: ['RPG'],
+        platforms: ['PC'],
+        rating: 90,
+        trailerYoutubeId: '',
+      }),
+    );
+
+    const { total } = await ctx.refresher.refreshAll('missing');
+    expect(total).toBe(0);
+    expect((await ctx.models.Game.findByPk(305152)).trailerYoutubeId).toBe('');
+  });
+
   it('"missing" mode skips a game when the provider has nothing new to add', async () => {
     await ctx.models.Game.create(
       makeGameRow(libRoot, {

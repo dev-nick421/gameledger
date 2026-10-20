@@ -10,6 +10,7 @@ import { createIgdbClient } from '../src/services/igdb.js';
 import { createSteamGridClient } from '../src/services/steamgriddb.js';
 import { createMetadataService } from '../src/services/metadata.js';
 import { createScanner } from '../src/services/scanner.js';
+import { createMetadataRefresher } from '../src/services/metadataRefresh.js';
 import { toSteamGridKey } from '../src/services/providerIds.js';
 import { config } from '../src/config.js';
 import { makeServer, authHeader } from './helpers.js';
@@ -149,6 +150,44 @@ describe('SteamGridDB as the only provider', () => {
     const game = await ctx.models.Game.findByPk(toSteamGridKey(2590));
     expect(game.title).toBe('Celeste');
     expect(game.gamePath).toBe(folder);
+  });
+});
+
+describe('SteamGridDB outages', () => {
+  let ctx;
+  let libRoot;
+
+  beforeEach(async () => {
+    ctx = await makeCtx({ steamGridDbApiKey: 'sgdb-key' });
+    libRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'gs-sgdb-down-'));
+    nock(SGDB).persist().get('/api/v2/games/id/2590').reply(200, { success: true, data: { id: 2590, name: 'Celeste', release_date: 1516665600 } });
+    nock(SGDB).persist().get(/\/api\/v2\/(grids|heroes)\/game\/\d+/).query(true).reply(503, { success: false, errors: ['Service Unavailable'] });
+  });
+
+  afterEach(async () => {
+    nock.cleanAll();
+    await ctx.sequelize.close();
+  });
+
+  it('fails an "all" refresh instead of wiping a SteamGridDB-only game\'s artwork', async () => {
+    const artwork = path.join(libRoot, 'Celeste - 2018 [sgdb-2590]', 'artwork');
+    fs.mkdirSync(artwork, { recursive: true });
+    fs.writeFileSync(path.join(artwork, 'cover.jpg'), 'existing cover');
+    await ctx.models.Game.create({
+      igdbId: toSteamGridKey(2590),
+      title: 'Celeste',
+      status: GAME_STATUS.COMPLETED,
+      coverPath: path.join(artwork, 'cover.jpg'),
+      gamePath: path.dirname(artwork),
+      archivePath: path.join(path.dirname(artwork), 'data', 'x.zip'),
+    });
+    const refresher = createMetadataRefresher({ models: ctx.models, metadata: ctx.metadata, broadcaster: { broadcast() {} } });
+
+    const { failed, updated } = await refresher.refreshAll('all');
+    expect(failed).toBe(1);
+    expect(updated).toBe(0);
+    expect(fs.existsSync(path.join(artwork, 'cover.jpg'))).toBe(true);
+    expect((await ctx.models.Game.findByPk(toSteamGridKey(2590))).coverPath).toBeTruthy();
   });
 });
 

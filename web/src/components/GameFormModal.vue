@@ -34,6 +34,8 @@ const background = ref(null);
 const screenshots = ref([]);
 const removeScreenshots = ref(false);
 const existingCover = ref(props.game?.coverUrl ?? null);
+// Trailer as loaded, to tell "cleared on purpose" from "left alone".
+let initialTrailerUrl = '';
 
 // Which fields IGDB never filled in, so the form can flag them the same way
 // the "Missing info" badge does in the table. Custom games aren't IGDB-backed,
@@ -90,6 +92,7 @@ onMounted(async () => {
       form.platforms = (data.platforms ?? []).join(', ');
       form.rating = data.rating ?? '';
       form.trailerUrl = data.trailerYoutubeId ? `https://www.youtube.com/watch?v=${data.trailerYoutubeId}` : '';
+      initialTrailerUrl = form.trailerUrl;
       existingCover.value = data.coverUrl;
       if (flagMissing) {
         missingFields.releaseYear = data.releaseYear == null;
@@ -130,7 +133,7 @@ async function submit() {
   fd.append('genres', form.genres);
   fd.append('platforms', form.platforms);
   fd.append('rating', form.rating === '' ? '' : String(form.rating));
-  fd.append('trailerUrl', form.trailerUrl.trim());
+  if (form.trailerUrl.trim() !== initialTrailerUrl) fd.append('trailerUrl', form.trailerUrl.trim());
   if (cover.value) fd.append('cover', cover.value);
   if (background.value) fd.append('background', background.value);
   for (const s of screenshots.value) fd.append('screenshots', s);
