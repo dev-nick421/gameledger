@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import archiver from 'archiver';
+import { isWithin } from './paths.js';
 
 // Streaming compression so multi-gigabyte games never load into memory.
 // `onProgress(percent)` is called as bytes are processed (best-effort).
@@ -109,6 +110,13 @@ export function normaliseLevel(level) {
  * zlib `level` (0..9) to trade speed against size.
  */
 export async function createArchive(sourcePath, destPath, onProgress, signal, level) {
+  // Writing the archive inside the folder being archived would truncate
+  // whatever already sits at destPath (often that game's existing archive)
+  // and zip a file that is still being written. Callers then delete the
+  // source, so this must fail before a single byte is written.
+  if (!isZip(sourcePath) && isWithin(destPath, sourcePath)) {
+    throw new Error(`Refusing to write ${destPath} inside the folder being archived`);
+  }
   if (isZip(sourcePath)) {
     // Existing zips are copied verbatim, so the compression level is moot.
     await copyZip(sourcePath, destPath, onProgress, signal);

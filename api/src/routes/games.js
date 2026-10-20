@@ -14,6 +14,7 @@ import { isMissingMetadata, missingMetadataFields, needsMetadataRefresh } from '
 import { metadataFields } from '../services/metadata.js';
 import { providerOf, providerIdOf } from '../services/providerIds.js';
 import { parseYoutubeId } from '../services/youtube.js';
+import { exists, overlaps, ownedPaths, touchesAny } from '../services/paths.js';
 
 // In-memory upload buffering for hand-authored artwork
 const upload = multer({
@@ -90,6 +91,34 @@ export function gameRoutes({ models, metadata, namingSchemeProvider, metadataRef
     if (game.coverPath) return path.dirname(game.coverPath);
     if (game.gamePath) return path.join(game.gamePath, 'artwork');
     return path.join(config.customDir, String(game.igdbId), 'artwork');
+  }
+
+  // Everything on disk other games depend on, so destructive operations on
+  // one entry can check they won't take another game's files with them.
+  async function pathsOwnedByOthers(igdbId) {
+    const others = await Game.findAll({ attributes: ['igdbId', 'gamePath', 'sourcePath'] });
+    return ownedPaths(others, igdbId);
+  }
+
+  // Delete a game's own files, skipping anything another game still uses
+  // (e.g. an Unmatched duplicate whose "source" is a catalogued game's folder).
+  // Returns the paths that were kept.
+  async function removeGameFiles(game, protectedPaths) {
+    const candidates = [
+      game.gamePath,
+      game.custom ? path.join(config.customDir, String(game.igdbId)) : null,
+      game.sourcePath,
+    ].filter(Boolean);
+    const kept = [];
+    for (const p of candidates) {
+      if (touchesAny(p, protectedPaths)) {
+        kept.push(p);
+        continue;
+      }
+      // eslint-disable-next-line no-await-in-loop
+      await fs.promises.rm(p, { recursive: true, force: true }).catch(() => {});
+    }
+    return kept;
   }
 
   // Persist an uploaded image buffer as <name>.jpg in dir and return its path.
@@ -271,6 +300,15 @@ export function gameRoutes({ models, metadata, namingSchemeProvider, metadataRef
     const artworkDir = path.join(gamePath, 'artwork');
     const dataDir = path.join(gamePath, 'data');
 
+    // Building the game folder over (or inside) the source would archive it
+    // into itself and then delete it; an existing folder isn't ours to fill.
+    if (overlaps(gamePath, normalizedSource)) {
+      return res.status(409).json({ error: 'The folder already has the name its game folder needs. Rename it and try again.' });
+    }
+    if (await exists(gamePath)) {
+      return res.status(409).json({ error: `${folderName} already exists in the library.` });
+    }
+
     try {
       await fs.promises.mkdir(artworkDir, { recursive: true });
       await fs.promises.mkdir(dataDir, { recursive: true });
@@ -405,6 +443,43 @@ export function gameRoutes({ models, metadata, namingSchemeProvider, metadataRef
     const game = await Game.findByPk(oldId);
     if (!game) return res.status(404).json({ error: 'Game not found' });
 
+    // The folder this entry stands for: the untouched source of an Unmatched
+    // game, otherwise its game folder.
+    const ownFolder = game.status === GAME_STATUS.UNMATCHED ? game.sourcePath : game.gamePath;
+
+    // Matching to a game that's already in the library makes this entry a
+    // duplicate of it. Rebuilding would write over that game's folder, so
+    // merge instead: drop this entry and keep the existing game as it is.
+    const target = oldId !== newId ? await Game.findByPk(newId) : null;
+    if (target) {
+      const sameFolder = Boolean(ownFolder) && [target.gamePath, target.sourcePath].some((p) => p && overlaps(ownFolder, p));
+      if (!sameFolder && !req.body?.merge) {
+        return res.status(409).json({
+          code: 'ALREADY_IN_LIBRARY',
+          error: `"${target.title}" is already in your library.`,
+          existing: { igdbId: target.igdbId, title: target.title },
+          duplicatePath: ownFolder ?? null,
+        });
+      }
+      // A separate copy's own files go (the user confirmed the merge); a
+      // re-scanned folder *is* the existing game's, so nothing on disk changes.
+      const keptFiles = sameFolder ? [] : await removeGameFiles(game, await pathsOwnedByOthers(oldId));
+      await Screenshot.destroy({ where: { igdbId: oldId } });
+      await Game.destroy({ where: { igdbId: oldId } });
+      logger?.user(`merged duplicate "${game.title}" into "${target.title}"`, {
+        meta: { igdbId: newId, duplicateId: oldId },
+      });
+      return res.json({ ...serializeCard(target, await scheme()), merged: true, keptFiles });
+    }
+
+    // An entry pointing at another game's folder can't be rebuilt without
+    // destroying that game's files.
+    if (ownFolder && touchesAny(ownFolder, await pathsOwnedByOthers(oldId))) {
+      return res.status(409).json({
+        error: 'This entry points at a folder that belongs to another game. Delete the entry instead; the files are kept.',
+      });
+    }
+
     let data;
     try {
       data = await metadata.getGame(newId);
@@ -430,6 +505,17 @@ export function gameRoutes({ models, metadata, namingSchemeProvider, metadataRef
     const newGamePath = path.join(libPath, folderName);
     const newArtworkDir = path.join(newGamePath, 'artwork');
     const newDataDir = path.join(newGamePath, 'data');
+    const compressSource = game.status === GAME_STATUS.UNMATCHED && game.sourcePath;
+
+    if (compressSource && overlaps(newGamePath, game.sourcePath)) {
+      return res.status(409).json({
+        error: 'The folder already has the name the matched game needs. Rename it and try again.',
+      });
+    }
+    const movingFolder = !game.gamePath || path.resolve(game.gamePath) !== path.resolve(newGamePath);
+    if (movingFolder && (await exists(newGamePath))) {
+      return res.status(409).json({ error: `${folderName} already exists in the library.` });
+    }
 
     await fs.promises.mkdir(newArtworkDir, { recursive: true });
     await fs.promises.mkdir(newDataDir, { recursive: true });
@@ -439,9 +525,17 @@ export function gameRoutes({ models, metadata, namingSchemeProvider, metadataRef
     const archiveName = `${folderName}.zip`;
     const newArchivePath = path.join(newDataDir, archiveName);
 
-    if (game.status === GAME_STATUS.UNMATCHED && game.sourcePath) {
-      // Never compressed yet compress the preserved source now.
-      await createArchive(game.sourcePath, newArchivePath, undefined, undefined, await compressionLevel());
+    if (compressSource) {
+      // Never compressed yet compress the preserved source now, via a .tmp so
+      // a failure leaves no half-written archive, and only then drop the source.
+      try {
+        await createArchive(game.sourcePath, `${newArchivePath}.tmp`, undefined, undefined, await compressionLevel());
+        await fs.promises.rename(`${newArchivePath}.tmp`, newArchivePath);
+      } catch (err) {
+        await fs.promises.rm(newGamePath, { recursive: true, force: true }).catch(() => {});
+        logger?.system(`failed packaging "${game.title}" for a new match: ${err?.message}`, { level: 'error' });
+        return res.status(500).json({ error: 'Failed to package the game folder.' });
+      }
       await fs.promises.rm(game.sourcePath, { recursive: true, force: true });
     } else if (game.archivePath) {
       // Already have an archive move it to the new location.
@@ -606,6 +700,18 @@ export function gameRoutes({ models, metadata, namingSchemeProvider, metadataRef
       // Snapshot before update() nulls it out on the in-memory instance.
       const originalSourcePath = game.sourcePath;
 
+      if (touchesAny(originalSourcePath, await pathsOwnedByOthers(game.igdbId))) {
+        return res.status(409).json({
+          error: 'This entry points at a folder that belongs to another game. Delete the entry instead; the files are kept.',
+        });
+      }
+      if (overlaps(gamePath, originalSourcePath)) {
+        return res.status(409).json({ error: 'The folder already has the name its game folder needs. Rename it and try again.' });
+      }
+      if (await exists(gamePath)) {
+        return res.status(409).json({ error: `${folderName} already exists in the library.` });
+      }
+
       try {
         await fs.promises.mkdir(artworkDir, { recursive: true });
         await fs.promises.mkdir(dataDir, { recursive: true });
@@ -675,26 +781,20 @@ export function gameRoutes({ models, metadata, namingSchemeProvider, metadataRef
 
   // Delete a game and its on-disk artifacts. Scanned games take their whole
   // game folder (archive + artwork); custom games take their managed dir.
+  // Files another entry still uses are never removed.
   router.delete('/games/:igdbId', requireAuth, async (req, res) => {
     const game = await Game.findByPk(Number(req.params.igdbId));
     if (!game) return res.status(404).json({ error: 'Game not found' });
 
-    if (game.gamePath) {
-      await fs.promises.rm(game.gamePath, { recursive: true, force: true }).catch(() => {});
-    }
-    if (game.custom) {
-      await fs.promises
-        .rm(path.join(config.customDir, String(game.igdbId)), { recursive: true, force: true })
-        .catch(() => {});
-    }
-    if (game.sourcePath) {
-      await fs.promises.rm(game.sourcePath, { recursive: true, force: true }).catch(() => {});
-    }
+    const keptFiles = await removeGameFiles(game, await pathsOwnedByOthers(game.igdbId));
 
     await Screenshot.destroy({ where: { igdbId: game.igdbId } });
     await Game.destroy({ where: { igdbId: game.igdbId } });
-    logger?.user(`deleted game "${game.title}"`, { meta: { igdbId: game.igdbId } });
-    res.json({ ok: true });
+    logger?.user(
+      `deleted game "${game.title}"${keptFiles.length ? ' (kept files another game uses)' : ''}`,
+      { meta: { igdbId: game.igdbId, keptFiles } },
+    );
+    res.json({ ok: true, keptFiles });
   });
 
   return router;

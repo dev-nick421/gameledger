@@ -126,6 +126,30 @@ Critical invariants:
   still scheme-shaped folder name (e.g. never "Foo - 2025 [12345]" as the
   title). Folders whose name doesn't fit the active scheme are left untouched
   and logged as a warning rather than guessed at.
+- **A folder or zip whose name fits the naming scheme and carries the id of a
+  game already in the catalogue *is* that game**, wherever the stored
+  `gamePath` says it lives (library remounted/moved, path typed differently;
+  path comparisons are resolved, see `services/paths.js`). It is never raw
+  input: the scheme-shaped name matches badly, so it would become an Unmatched
+  duplicate whose "source" is the real game folder, and deleting or rematching
+  that duplicate used to destroy the game. If the stored folder no longer
+  exists, the game is **relinked** to the found folder (`relinkFolder`, run by
+  scans and by "Refresh library" *before* it prunes anything); if it still
+  exists, the found folder is a second copy and is left alone.
+- **`removeDuplicateEntries`** (on boot, at the start of every scan and refresh)
+  drops Unmatched rows whose source is a catalogued game's folder. Database
+  only; the files belong to the catalogued game.
+- **Destructive operations never touch another game's files.** Delete, the
+  manual "process" edit and rematch check `ownedPaths` first; delete keeps
+  shared paths and reports them as `keptFiles`. Rematching onto an id that's
+  already in the library is a **merge**: silent when it's the same folder,
+  otherwise `409 ALREADY_IN_LIBRARY` until the client confirms with
+  `merge: true` (which deletes only the duplicate's own copy).
+- **Never build a game folder over or inside its source.** `createArchive`
+  refuses a destination inside the folder it archives (writing there truncates
+  the existing archive before reading a byte), the scanner and routes refuse a
+  target folder that overlaps the source or already exists unowned, and a
+  failed scan job only rolls back a folder that job created.
 - **On startup, any `RUNNING` jobs are reset to `FAILED`** so interrupted jobs
   become retryable instead of stuck forever.
 - Compression streams via `archiver` (safe for multi-GB inputs); existing zips are

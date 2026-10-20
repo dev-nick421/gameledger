@@ -2,12 +2,14 @@
 import { ref, watch } from 'vue';
 import client from '../api/client.js';
 import { useEscape } from '../composables/useEscape.js';
+import { useToastStore } from '../stores/toast.js';
 
 const props = defineProps({
   game: { type: Object, required: true }, // { igdbId, title }
 });
 const emit = defineEmits(['close', 'corrected', 'edit-manually']);
 useEscape(() => emit('close'));
+const toast = useToastStore();
 
 const PROVIDER_LABELS = { igdb: 'IGDB', steamgriddb: 'SteamGridDB' };
 
@@ -17,6 +19,9 @@ const selected = ref(null);
 const searching = ref(false);
 const saving = ref(false);
 const error = ref(null);
+// Set when the picked game is already in the library: this entry is a
+// duplicate, and the user decides whether to merge it away.
+const conflict = ref(null);
 
 let debounce = null;
 watch(query, (q) => {
@@ -41,21 +46,30 @@ async function runSearch() {
   }
 }
 
-async function confirm() {
+async function confirm({ merge = false } = {}) {
   if (!selected.value) return;
   saving.value = true;
   error.value = null;
   try {
-    await client.patch(`/games/${props.game.igdbId}/match`, {
+    const { data } = await client.patch(`/games/${props.game.igdbId}/match`, {
       new_igdb_id: selected.value.igdbId,
+      merge,
     });
+    if (data.merged) {
+      toast.push(`Merged into “${data.title}”, which was already in your library.`, 'ok');
+    }
     emit('corrected', selected.value.igdbId);
   } catch (err) {
-    error.value = err.response?.data?.error || 'Failed to apply the correction.';
+    if (err.response?.data?.code === 'ALREADY_IN_LIBRARY') conflict.value = err.response.data;
+    else error.value = err.response?.data?.error || 'Failed to apply the correction.';
   } finally {
     saving.value = false;
   }
 }
+
+watch(selected, () => {
+  conflict.value = null;
+});
 
 // Search immediately on open with the existing title.
 runSearch();
@@ -114,13 +128,28 @@ runSearch();
         </p>
       </div>
 
+      <div v-if="conflict" class="mt-4 rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200" role="alert">
+        <p class="font-medium">“{{ conflict.existing.title }}” is already in your library.</p>
+        <p class="mt-1">
+          This entry is a second copy. Merging removes it<template v-if="conflict.duplicatePath"> and deletes its folder
+          <code class="break-all rounded bg-amber-100 px-1 dark:bg-black/30">{{ conflict.duplicatePath }}</code></template>.
+          The game already in your library is not touched.
+        </p>
+        <div class="mt-3 flex justify-end gap-2">
+          <button class="btn-ghost !py-1.5" @click="conflict = null">Keep both</button>
+          <button class="btn-primary !py-1.5" :disabled="saving" @click="confirm({ merge: true })">
+            {{ saving ? 'Merging…' : 'Merge' }}
+          </button>
+        </div>
+      </div>
+
       <div class="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-4 dark:border-shelf-border">
         <button class="text-sm font-medium text-gray-500 transition hover:text-gray-900 dark:hover:text-gray-100" @click="emit('edit-manually')">
           Can't find it? Enter details by hand
         </button>
         <div class="flex gap-2">
           <button class="btn-ghost" @click="emit('close')">Cancel</button>
-          <button class="btn-primary" :disabled="!selected || saving" @click="confirm">
+          <button class="btn-primary" :disabled="!selected || saving || !!conflict" @click="confirm()">
             {{ saving ? 'Applying…' : 'Confirm match' }}
           </button>
         </div>

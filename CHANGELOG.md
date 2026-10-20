@@ -32,6 +32,14 @@ All notable changes to GameLedger are documented here. This project adheres to
   `.env` were never passed to the API container by `docker-compose.yml`.
 - The library only ever showed the first 100 games.
 - Manage Games sorted titles case-sensitively.
+- Already-catalogued game folders could be re-scanned as new games after an
+  upgrade or a library move, leaving Unmatched duplicates that pointed at the
+  real folders. Deleting such a duplicate deleted the game's files, and "Fix
+  match" overwrote its archive and then deleted the folder. Scans now
+  recognise these folders (and relink games whose folder moved), existing
+  duplicates are cleaned up automatically on start, "Fix match" onto a game
+  that's already in the library merges instead, and no delete, edit or rematch
+  can remove files another game uses.
 
 ## [1.0.0] - First public release
 
