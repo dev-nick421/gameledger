@@ -144,7 +144,8 @@ export function gameRoutes({ models, metadata, namingSchemeProvider, metadataRef
   // Admin management table (+ CRUD)
   router.get('/games/manage', requireAuth, async (req, res) => {
     const namingScheme = await scheme();
-    const games = await Game.findAll({ order: [['title', 'ASC']] });
+    // Case-insensitive so a lowercase folder-derived title doesn't sink to the end.
+    const games = await Game.findAll({ order: [[Game.sequelize.fn('lower', Game.sequelize.col('title')), 'ASC']] });
     const items = games.map((g) => {
       const refreshable = !g.custom && g.status === GAME_STATUS.COMPLETED;
       return {
@@ -330,6 +331,7 @@ export function gameRoutes({ models, metadata, namingSchemeProvider, metadataRef
       platforms: game.platforms ?? [],
       rating: game.rating,
       status: game.status,
+      custom: Boolean(game.custom),
       provider: providerOf(game.igdbId),
       providerId: providerIdOf(game.igdbId),
       trailerYoutubeId: game.trailerYoutubeId ?? null,

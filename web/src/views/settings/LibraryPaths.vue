@@ -33,8 +33,8 @@ onMounted(load);
 
 <template>
   <section class="card p-5">
-    <h2 class="mb-1 text-lg font-semibold">Library paths</h2>
-    <p class="mb-4 text-sm text-gray-500">
+    <h2 class="section-title">Library paths</h2>
+    <p class="section-desc mb-4">
       Absolute paths the scanner reads from. Processed games are stored back into
       these folders.
     </p>
@@ -43,10 +43,13 @@ onMounted(load);
       <li
         v-for="lib in libraries"
         :key="lib.id"
-        class="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2 text-sm dark:bg-shelf-elevated"
+        class="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 py-1.5 pl-3 pr-1.5 text-sm dark:border-shelf-border dark:bg-shelf-elevated"
       >
-        <span class="truncate font-mono">{{ lib.path }}</span>
-        <button class="inline-flex shrink-0 items-center gap-1 text-red-500 hover:underline" @click="removeLibrary(lib.id)" title="Remove">
+        <span class="flex min-w-0 items-center gap-2">
+          <svg class="h-4 w-4 shrink-0 text-gray-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
+          <span class="truncate font-mono">{{ lib.path }}</span>
+        </span>
+        <button v-tooltip="'Stop scanning this folder (files stay on disk)'" class="icon-btn !h-8 !w-8 hover:!bg-red-500/10 hover:!text-red-600" :aria-label="`Remove ${lib.path}`" @click="removeLibrary(lib.id)">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="3 6 5 6 21 6" />
             <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
@@ -54,7 +57,9 @@ onMounted(load);
           </svg>
         </button>
       </li>
-      <li v-if="!libraries.length" class="text-sm text-gray-400">No library paths configured.</li>
+      <li v-if="!libraries.length" class="rounded-lg border border-dashed border-gray-200 px-4 py-5 text-center text-sm text-gray-400 dark:border-shelf-border">
+        No library paths yet. Add the folder that holds your games; in Docker that’s <code class="font-mono">/games</code>.
+      </li>
     </ul>
 
     <div class="flex gap-2">
@@ -66,6 +71,6 @@ onMounted(load);
         Add
       </button>
     </div>
-    <p v-if="error" class="mt-2 text-sm text-red-500">{{ error }}</p>
+    <p v-if="error" class="alert-error mt-3">{{ error }}</p>
   </section>
 </template>

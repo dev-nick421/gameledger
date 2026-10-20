@@ -1,11 +1,13 @@
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue';
 import client from '../api/client.js';
+import { useEscape } from '../composables/useEscape.js';
 
 const props = defineProps({
   game: { type: Object, default: null },
 });
 const emit = defineEmits(['close', 'saved']);
+useEscape(() => emit('close'));
 
 const isEdit = !!props.game;
 const isUnmatched = props.game?.status === 'Unmatched';
@@ -24,6 +26,7 @@ const form = reactive({
   genres: '',
   platforms: '',
   rating: '',
+  trailerUrl: '',
 });
 
 const cover = ref(null);
@@ -66,6 +69,10 @@ function selectSource(src) {
   step.value = 2;
 }
 
+const youtubeSearchUrl = computed(
+  () => `https://www.youtube.com/results?search_query=${encodeURIComponent(`${form.title || props.game?.title || ''} trailer`)}`,
+);
+
 const title = computed(() => {
   if (isEdit) return 'Edit game';
   if (step.value === 1) return 'Select folder';
@@ -82,6 +89,7 @@ onMounted(async () => {
       form.genres = (data.genres ?? []).join(', ');
       form.platforms = (data.platforms ?? []).join(', ');
       form.rating = data.rating ?? '';
+      form.trailerUrl = data.trailerYoutubeId ? `https://www.youtube.com/watch?v=${data.trailerYoutubeId}` : '';
       existingCover.value = data.coverUrl;
       if (flagMissing) {
         missingFields.releaseYear = data.releaseYear == null;
@@ -122,6 +130,7 @@ async function submit() {
   fd.append('genres', form.genres);
   fd.append('platforms', form.platforms);
   fd.append('rating', form.rating === '' ? '' : String(form.rating));
+  fd.append('trailerUrl', form.trailerUrl.trim());
   if (cover.value) fd.append('cover', cover.value);
   if (background.value) fd.append('background', background.value);
   for (const s of screenshots.value) fd.append('screenshots', s);
@@ -145,16 +154,16 @@ async function submit() {
 </script>
 
 <template>
-  <div class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4" @click.self="emit('close')">
-    <div class="card my-8 w-full max-w-2xl p-6">
+  <div class="modal-backdrop" @click.self="emit('close')">
+    <div class="card my-auto w-full max-w-2xl p-6 shadow-2xl" role="dialog" aria-modal="true" :aria-label="title">
       <div class="mb-4 flex items-center justify-between">
         <h2 class="text-lg font-semibold">{{ title }}</h2>
-        <button class="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-shelf-elevated" @click="emit('close')">
+        <button class="icon-btn -mr-2" aria-label="Close" @click="emit('close')">
           <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
         </button>
       </div>
 
-      <p v-if="error" class="mb-3 rounded-lg bg-red-100 p-2 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-400">{{ error }}</p>
+      <p v-if="error" class="alert-error mb-3">{{ error }}</p>
 
       <!-- Step 1: folder picker (create only) -->
       <template v-if="step === 1">
@@ -209,14 +218,14 @@ async function submit() {
             <div>
               <label class="mb-1 flex items-center gap-1 text-sm" :class="missingFields.releaseYear ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500'">
                 Release year
-                <svg v-if="missingFields.releaseYear" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" title="Missing from IGDB"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+                <svg v-if="missingFields.releaseYear" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-tooltip="'Your metadata provider didn\u2019t supply this'" aria-label="Missing"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
               </label>
               <input v-model="form.releaseYear" type="number" class="input" :class="{ 'ring-1 ring-amber-400 dark:ring-amber-500/60': missingFields.releaseYear }" placeholder="2024" />
             </div>
             <div>
               <label class="mb-1 flex items-center gap-1 text-sm" :class="missingFields.rating ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500'">
                 Rating (0–100)
-                <svg v-if="missingFields.rating" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" title="Missing from IGDB"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+                <svg v-if="missingFields.rating" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-tooltip="'Your metadata provider didn\u2019t supply this'" aria-label="Missing"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
               </label>
               <input v-model="form.rating" type="number" min="0" max="100" class="input" :class="{ 'ring-1 ring-amber-400 dark:ring-amber-500/60': missingFields.rating }" placeholder="—" />
             </div>
@@ -225,7 +234,7 @@ async function submit() {
           <div>
             <label class="mb-1 flex items-center gap-1 text-sm" :class="missingFields.summary ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500'">
               Summary
-              <svg v-if="missingFields.summary" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" title="Missing from IGDB"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+              <svg v-if="missingFields.summary" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-tooltip="'Your metadata provider didn\u2019t supply this'" aria-label="Missing"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
             </label>
             <textarea v-model="form.summary" rows="3" class="input" :class="{ 'ring-1 ring-amber-400 dark:ring-amber-500/60': missingFields.summary }" placeholder="Short description…"></textarea>
           </div>
@@ -234,7 +243,7 @@ async function submit() {
             <div>
               <label class="mb-1 flex items-center gap-1 text-sm" :class="missingFields.genres ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500'">
                 Genres
-                <svg v-if="missingFields.genres" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" title="Missing from IGDB"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+                <svg v-if="missingFields.genres" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-tooltip="'Your metadata provider didn\u2019t supply this'" aria-label="Missing"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
               </label>
               <input v-model="form.genres" class="input" :class="{ 'ring-1 ring-amber-400 dark:ring-amber-500/60': missingFields.genres }" placeholder="Action, RPG" />
               <p class="mt-1 text-xs text-gray-400">Comma-separated</p>
@@ -242,11 +251,26 @@ async function submit() {
             <div>
               <label class="mb-1 flex items-center gap-1 text-sm" :class="missingFields.platforms ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500'">
                 Platforms
-                <svg v-if="missingFields.platforms" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" title="Missing from IGDB"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+                <svg v-if="missingFields.platforms" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-tooltip="'Your metadata provider didn\u2019t supply this'" aria-label="Missing"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
               </label>
               <input v-model="form.platforms" class="input" :class="{ 'ring-1 ring-amber-400 dark:ring-amber-500/60': missingFields.platforms }" placeholder="PC, PS5" />
               <p class="mt-1 text-xs text-gray-400">Comma-separated</p>
             </div>
+          </div>
+
+          <div>
+            <div class="mb-1 flex items-center justify-between gap-2">
+              <label class="text-sm text-gray-500" for="trailer-url">Trailer</label>
+              <a :href="youtubeSearchUrl" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-xs font-medium text-shelf-accent hover:underline">
+                Find on YouTube
+                <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" y1="14" x2="21" y2="3" /></svg>
+              </a>
+            </div>
+            <input id="trailer-url" v-model="form.trailerUrl" class="input" placeholder="https://www.youtube.com/watch?v=…" inputmode="url" />
+            <p class="mt-1 text-xs text-gray-400">
+              Paste any YouTube link. Leave empty for no trailer.
+              <template v-if="flagMissing && !form.trailerUrl">No confident trailer was found automatically.</template>
+            </p>
           </div>
 
           <!-- Artwork -->
@@ -254,22 +278,22 @@ async function submit() {
             <div>
               <label class="mb-1 flex items-center gap-1 text-sm" :class="missingFields.cover ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500'">
                 Cover image
-                <svg v-if="missingFields.cover" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" title="Missing from IGDB"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+                <svg v-if="missingFields.cover" class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" v-tooltip="'Your metadata provider didn\u2019t supply this'" aria-label="Missing"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
               </label>
               <div class="flex items-center gap-2 rounded-lg p-1" :class="{ 'ring-1 ring-amber-400 dark:ring-amber-500/60': missingFields.cover }">
                 <img v-if="existingCover" :src="existingCover" class="h-16 w-12 rounded object-cover" />
-                <input type="file" accept="image/*" class="text-xs" @change="onFile('cover', $event)" />
+                <input type="file" accept="image/*" class="text-xs text-gray-500 file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-gray-200 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-gray-800 hover:file:bg-gray-300 dark:text-gray-400 dark:file:bg-shelf-elevated dark:file:text-gray-100 dark:hover:file:bg-shelf-border" @change="onFile('cover', $event)" />
               </div>
             </div>
             <div>
               <label class="mb-1 block text-sm text-gray-500">Background image</label>
-              <input type="file" accept="image/*" class="text-xs" @change="onFile('background', $event)" />
+              <input type="file" accept="image/*" class="text-xs text-gray-500 file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-gray-200 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-gray-800 hover:file:bg-gray-300 dark:text-gray-400 dark:file:bg-shelf-elevated dark:file:text-gray-100 dark:hover:file:bg-shelf-border" @change="onFile('background', $event)" />
             </div>
           </div>
 
           <div>
             <label class="mb-1 block text-sm text-gray-500">Screenshots</label>
-            <input type="file" accept="image/*" multiple class="text-xs" @change="onFile('screenshots', $event)" />
+            <input type="file" accept="image/*" multiple class="text-xs text-gray-500 file:mr-3 file:cursor-pointer file:rounded-md file:border-0 file:bg-gray-200 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-gray-800 hover:file:bg-gray-300 dark:text-gray-400 dark:file:bg-shelf-elevated dark:file:text-gray-100 dark:hover:file:bg-shelf-border" @change="onFile('screenshots', $event)" />
             <label v-if="isEdit" class="mt-2 flex cursor-pointer items-center gap-2 text-xs text-gray-500">
               <input v-model="removeScreenshots" type="checkbox" class="h-4 w-4 rounded" />
               Remove all existing screenshots

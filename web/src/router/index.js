@@ -18,10 +18,12 @@ const routes = [
         component: () => import('../views/settings/ScanningSettings.vue'),
       },
       {
-        path: 'igdb',
-        name: 'settings-igdb',
-        component: () => import('../views/settings/IgdbSettings.vue'),
+        path: 'providers',
+        name: 'settings-providers',
+        component: () => import('../views/settings/ProvidersSettings.vue'),
       },
+      // Old location of the IGDB settings, kept so bookmarks still land.
+      { path: 'igdb', redirect: { name: 'settings-providers' } },
       {
         path: 'library',
         name: 'settings-library',

@@ -79,30 +79,30 @@ onUnmounted(() => clearInterval(poll));
   <section class="card p-5">
     <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
       <div>
-        <h2 class="flex items-center gap-2 text-lg font-semibold">
+        <h2 class="section-title">
           <svg class="h-5 w-5 text-shelf-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" />
             <line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" />
           </svg>
           Logs
         </h2>
-        <p class="mt-1 text-sm text-gray-500">{{ total }} entr{{ total === 1 ? 'y' : 'ies' }}</p>
+        <p class="section-desc">{{ total }} entr{{ total === 1 ? 'y' : 'ies' }}</p>
       </div>
       <div class="flex items-center gap-2">
         <select v-model="sourceFilter" class="input !w-auto py-1.5 text-sm" @change="load">
           <option v-for="s in SOURCES" :key="s.value" :value="s.value">{{ s.label }}</option>
         </select>
-        <button class="btn-ghost text-sm" @click="load" title="Refresh">
+        <button v-tooltip="'Refresh'" class="icon-btn" aria-label="Refresh" @click="load">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M23 4v6h-6M1 20v-6h6" />
             <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
           </svg>
         </button>
-        <button class="btn-ghost text-sm text-red-500" @click="clearLogs">Clear</button>
+        <button class="btn-danger" @click="clearLogs">Clear</button>
       </div>
     </div>
 
-    <p v-if="error" class="mb-3 rounded-lg bg-red-100 p-2 text-sm text-red-700">{{ error }}</p>
+    <p v-if="error" class="alert-error mb-3">{{ error }}</p>
 
     <div v-if="loading && !logs.length" class="py-10 text-center text-sm text-gray-400">Loading…</div>
     <div v-else-if="!logs.length" class="py-10 text-center text-sm text-gray-400">No log entries yet.</div>
@@ -113,7 +113,7 @@ onUnmounted(() => clearInterval(poll));
         :key="log.id"
         class="flex items-start gap-3 border-b border-gray-100 px-3 py-2 text-sm last:border-0 dark:border-shelf-border"
       >
-        <span class="w-32 shrink-0 font-mono text-xs text-gray-400">{{ fmtTime(log.createdAt) }}</span>
+        <span class="w-40 shrink-0 whitespace-nowrap pt-0.5 font-mono text-xs text-gray-400">{{ fmtTime(log.createdAt) }}</span>
         <span
           class="shrink-0 rounded px-1.5 py-0.5 text-xs font-semibold uppercase tracking-wide"
           :class="SOURCE_STYLES[log.source] || SOURCE_STYLES.system"

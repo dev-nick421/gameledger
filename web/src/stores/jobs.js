@@ -17,6 +17,10 @@ export const useJobsStore = defineStore('jobs', {
     onJobEvent(event) {
       this.live[String(event.jobId)] = event;
     },
+    // Forget dismissed jobs so their last progress event stops showing.
+    remove(...jobIds) {
+      for (const id of jobIds) delete this.live[String(id)];
+    },
     clear() {
       this.live = {};
     },

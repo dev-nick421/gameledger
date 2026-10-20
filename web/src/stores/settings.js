@@ -8,6 +8,9 @@ export const useSettingsStore = defineStore('settings', {
   state: () => ({
     loaded: false,
     igdbConfigured: false,
+    igdbSource: null,
+    steamGridConfigured: false,
+    steamGridSource: null,
     namingScheme: '',
     scanSchedule: 'off',
     refreshSchedule: 'off',
@@ -19,6 +22,9 @@ export const useSettingsStore = defineStore('settings', {
   actions: {
     applyFromResponse(data) {
       this.igdbConfigured = data.igdbConfigured;
+      this.igdbSource = data.igdbSource ?? null;
+      this.steamGridConfigured = Boolean(data.steamGridConfigured);
+      this.steamGridSource = data.steamGridSource ?? null;
       this.namingScheme = data.namingScheme;
       this.scanSchedule = data.scanSchedule;
       this.refreshSchedule = data.refreshSchedule;
