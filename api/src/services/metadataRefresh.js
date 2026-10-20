@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { GAME_STATUS } from '../db/index.js';
 import { processArtwork } from './artwork.js';
+import { metadataFields } from './metadata.js';
 
 // No-op logger so the refresher works in tests/contexts without one wired in.
 const NULL_LOGGER = { system: () => {} };
@@ -23,8 +24,29 @@ export function isMissingMetadata(game) {
   );
 }
 
+// Which of those fields are blank, for UI hints ("Missing: summary, genres").
+export function missingMetadataFields(game) {
+  const missing = [];
+  if (game.releaseYear == null) missing.push('release year');
+  if (!game.summary) missing.push('summary');
+  if (!game.genres?.length) missing.push('genres');
+  if (!game.platforms?.length) missing.push('platforms');
+  if (game.rating == null) missing.push('rating');
+  if (!game.coverPath) missing.push('cover');
+  return missing;
+}
+
+// What "missing" mode refreshes: blank detail-page fields, plus games with no
+// trailer yet. A trailer isn't part of isMissingMetadata (plenty of games
+// legitimately have none), but libraries catalogued before trailers existed
+// should pick theirs up without a full "all" refresh.
+export function needsMetadataRefresh(game) {
+  return isMissingMetadata(game) || !game.trailerYoutubeId;
+}
+
 /**
- * Bulk-refreshes catalogued games' metadata/artwork from IGDB.
+ * Bulk-refreshes catalogued games' metadata/artwork from the configured
+ * metadata providers (see services/metadata.js).
  * safe to run repeatedly on a live library.
  *
  * options:
@@ -33,11 +55,11 @@ export function isMissingMetadata(game) {
  *               one to reach for when a field is wrong-but-present (e.g. a
  *               title that got mangled by something upstream of IGDB), since
  *               "missing" mode only fills in blanks.
- *  - "missing": only touches games with at least one blank field, and only
- *               fills in the blanks  present, non-empty fields and existing
- *               artwork are left alone.
+ *  - "missing": only touches games with at least one blank field (or no
+ *               trailer yet), and only fills in the blanks  present,
+ *               non-empty fields and existing artwork are left alone.
  */
-export function createMetadataRefresher({ models, igdb, broadcaster, logger = NULL_LOGGER }) {
+export function createMetadataRefresher({ models, metadata, broadcaster, logger = NULL_LOGGER }) {
   const { Game, Screenshot } = models;
   let running = false;
   const isRunning = () => running;
@@ -45,30 +67,30 @@ export function createMetadataRefresher({ models, igdb, broadcaster, logger = NU
   async function refreshOne(game, mode) {
     let data;
     try {
-      data = await igdb.getGame(game.igdbId);
+      data = await metadata.getGame(game.igdbId);
     } catch {
       data = null;
     }
     if (!data) return 'failed';
 
-    const releaseYear = data.first_release_date
-      ? new Date(data.first_release_date * 1000).getUTCFullYear()
-      : null;
+    const meta = metadataFields(data);
 
     const fields = {};
     if (mode === REFRESH_MODE.ALL) {
-      fields.title = data.name ?? game.title;
-      fields.releaseYear = releaseYear;
-      fields.summary = data.summary ?? null;
-      fields.genres = (data.genres ?? []).map((g) => g.name);
-      fields.platforms = (data.platforms ?? []).map((p) => p.name);
-      fields.rating = data.rating != null ? Math.round(data.rating) : null;
+      Object.assign(fields, meta, {
+        title: meta.title ?? game.title,
+        // A hand-picked trailer survives when the provider has none to offer.
+        trailerYoutubeId: meta.trailerYoutubeId ?? game.trailerYoutubeId ?? null,
+      });
     } else {
-      if (game.releaseYear == null) fields.releaseYear = releaseYear;
-      if (!game.summary) fields.summary = data.summary ?? null;
-      if (!game.genres?.length) fields.genres = (data.genres ?? []).map((g) => g.name);
-      if (!game.platforms?.length) fields.platforms = (data.platforms ?? []).map((p) => p.name);
-      if (game.rating == null) fields.rating = data.rating != null ? Math.round(data.rating) : null;
+      // Only fill blanks, and only with something: writing null over null
+      // would count a game as "updated" without changing anything.
+      if (game.releaseYear == null && meta.releaseYear != null) fields.releaseYear = meta.releaseYear;
+      if (!game.summary && meta.summary) fields.summary = meta.summary;
+      if (!game.genres?.length && meta.genres.length) fields.genres = meta.genres;
+      if (!game.platforms?.length && meta.platforms.length) fields.platforms = meta.platforms;
+      if (game.rating == null && meta.rating != null) fields.rating = meta.rating;
+      if (!game.trailerYoutubeId && meta.trailerYoutubeId) fields.trailerYoutubeId = meta.trailerYoutubeId;
     }
 
     const artworkDir = game.coverPath
@@ -124,7 +146,7 @@ export function createMetadataRefresher({ models, igdb, broadcaster, logger = NU
     try {
       // Custom (hand-authored) games have no IGDB-backed metadata to refresh.
       const games = await Game.findAll({ where: { status: GAME_STATUS.COMPLETED, custom: false } });
-      const targets = mode === REFRESH_MODE.ALL ? games : games.filter(isMissingMetadata);
+      const targets = mode === REFRESH_MODE.ALL ? games : games.filter(needsMetadataRefresh);
 
       let updated = 0;
       let skipped = 0;

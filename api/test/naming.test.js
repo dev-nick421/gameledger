@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { generateFolderName, extractIgdbId, parseFolderName } from '../src/services/naming.js';
+import { toSteamGridKey } from '../src/services/providerIds.js';
 
 const DEFAULT_SCHEME = '<Game Name> - <Release Year> [<IGDB_ID>]';
 
@@ -60,3 +61,23 @@ describe('parseFolderName', () => {
     });
   });
 });
+
+describe('SteamGridDB ids in names', () => {
+  it('writes them with an sgdb- prefix and reads them back', () => {
+    const folder = generateFolderName(
+      { title: 'Celeste', releaseYear: 2018, igdbId: toSteamGridKey(2590) },
+      DEFAULT_SCHEME,
+    );
+    expect(folder).toBe('Celeste - 2018 [sgdb-2590]');
+    expect(parseFolderName(folder, DEFAULT_SCHEME)).toEqual({
+      title: 'Celeste',
+      releaseYear: 2018,
+      igdbId: toSteamGridKey(2590),
+    });
+  });
+
+  it('keeps plain IGDB ids unchanged', () => {
+    expect(extractIgdbId('Halo - 2001 [740]', DEFAULT_SCHEME)).toBe(740);
+  });
+});
+

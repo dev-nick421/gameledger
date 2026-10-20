@@ -197,6 +197,63 @@ describe('games API', () => {
     expect(card.missingMetadata).toBe(true);
   });
 
+  it('explains which fields are missing and whether a refresh would help', async () => {
+    const res = await request(ctx.app).get('/api/games/manage').set(authHeader());
+    const card = res.body.items.find((i) => i.igdbId === 250616);
+    expect(card.missingFields).toEqual(['summary', 'genres', 'platforms', 'rating', 'cover']);
+    expect(card.needsRefresh).toBe(true);
+    expect(card.provider).toBe('igdb');
+  });
+
+  it('includes genres, platforms and when it was added in the grid feed', async () => {
+    await ctx.models.Game.update({ genres: ['Shooter'], platforms: ['PC'] }, { where: { igdbId: 250616 } });
+    const res = await request(ctx.app).get('/api/games');
+    const card = res.body.items.find((i) => i.igdbId === 250616);
+    expect(card.genres).toEqual(['Shooter']);
+    expect(card.platforms).toEqual(['PC']);
+    expect(card.addedAt).toBeTruthy();
+  });
+
+  it('sets, normalises and clears a trailer by hand', async () => {
+    const set = await request(ctx.app)
+      .put('/api/games/250616')
+      .set(authHeader())
+      .field('trailerUrl', 'https://youtu.be/UC_qla6FQwM');
+    expect(set.status).toBe(200);
+    let detail = await request(ctx.app).get('/api/games/250616');
+    expect(detail.body.trailerYoutubeId).toBe('UC_qla6FQwM');
+
+    const bad = await request(ctx.app)
+      .put('/api/games/250616')
+      .set(authHeader())
+      .field('trailerUrl', 'https://vimeo.com/1');
+    expect(bad.status).toBe(400);
+    expect(bad.body.error).toMatch(/YouTube/);
+
+    await request(ctx.app).put('/api/games/250616').set(authHeader()).field('trailerUrl', '');
+    detail = await request(ctx.app).get('/api/games/250616');
+    expect(detail.body.trailerYoutubeId).toBeNull();
+  });
+
+  it('publishes downloadable games in the catalog', async () => {
+    await ctx.models.Game.create({ igdbId: -5, title: 'No Files', status: 'Completed', custom: true });
+    const res = await request(ctx.app).get('/api/catalog');
+    expect(res.status).toBe(200);
+    expect(res.body.version).toBe(1);
+    expect(res.body.total).toBe(1);
+    const [game] = res.body.games;
+    expect(game).toMatchObject({
+      id: '250616',
+      provider: 'igdb',
+      providerId: 250616,
+      title: 'HELLDIVERS 2',
+      releaseYear: 2024,
+      downloadUrl: '/api/games/250616/download',
+      fileName: 'HELLDIVERS 2 - 2024 [250616].zip',
+    });
+    expect(game.sizeBytes).toBeGreaterThan(0);
+  });
+
   it('requires auth to trigger a metadata refresh', async () => {
     const res = await request(ctx.app).post('/api/games/refresh-metadata');
     expect(res.status).toBe(401);

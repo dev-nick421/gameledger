@@ -31,9 +31,16 @@ function stubIgdb() {
               rating: 92.3,
               genres: [{ name: 'RPG' }],
               platforms: [{ name: 'PC' }],
+              videos: [
+                { name: 'Gameplay Walkthrough', video_id: 'walkthrough' },
+                { name: 'Launch Trailer', video_id: 'launchTrlr1' },
+              ],
             },
           ],
         ];
+      }
+      if (text.includes('where id = 424242')) {
+        return [200, [{ id: 424242, name: 'No Trailer Game', summary: 'Nothing to watch.' }]];
       }
       if (text.includes('where id = 999999')) {
         return [200, []];
@@ -49,7 +56,7 @@ async function makeCtx() {
   const events = [];
   const broadcaster = { broadcast: (e) => events.push(e) };
   const igdb = createIgdbClient({ models });
-  const refresher = createMetadataRefresher({ models, igdb, broadcaster });
+  const refresher = createMetadataRefresher({ models, metadata: igdb, broadcaster });
   return { sequelize, models, refresher, events };
 }
 
@@ -142,6 +149,7 @@ describe('metadata refresher', () => {
         genres: ['RPG'],
         platforms: ['PC'],
         rating: 90,
+        trailerYoutubeId: 'existingTrl',
       }),
     );
 
@@ -149,6 +157,55 @@ describe('metadata refresher', () => {
     expect(total).toBe(0);
     expect(updated).toBe(0);
     expect(skipped).toBe(0);
+  });
+
+  it('"missing" mode picks up a trailer for an otherwise complete game', async () => {
+    await ctx.models.Game.create(
+      makeGameRow(libRoot, {
+        releaseYear: 2024,
+        summary: 'already there',
+        genres: ['RPG'],
+        platforms: ['PC'],
+        rating: 90,
+      }),
+    );
+
+    const { total, updated } = await ctx.refresher.refreshAll('missing');
+    expect(total).toBe(1);
+    expect(updated).toBe(1);
+
+    const game = await ctx.models.Game.findByPk(305152);
+    // The launch trailer, never the walkthrough listed before it.
+    expect(game.trailerYoutubeId).toBe('launchTrlr1');
+    expect(game.summary).toBe('already there');
+  });
+
+  it('"missing" mode skips a game when the provider has nothing new to add', async () => {
+    await ctx.models.Game.create(
+      makeGameRow(libRoot, {
+        igdbId: 424242,
+        releaseYear: 2024,
+        summary: 'already there',
+        genres: ['RPG'],
+        platforms: ['PC'],
+        rating: 90,
+      }),
+    );
+
+    const { total, updated, skipped } = await ctx.refresher.refreshAll('missing');
+    expect(total).toBe(1);
+    expect(updated).toBe(0);
+    expect(skipped).toBe(1);
+  });
+
+  it('"all" mode keeps a hand-picked trailer when the provider has none', async () => {
+    await ctx.models.Game.create(makeGameRow(libRoot, { igdbId: 424242, trailerYoutubeId: 'handPicked1' }));
+
+    await ctx.refresher.refreshAll('all');
+
+    const game = await ctx.models.Game.findByPk(424242);
+    expect(game.title).toBe('No Trailer Game');
+    expect(game.trailerYoutubeId).toBe('handPicked1');
   });
 
   it('never touches custom (hand-authored) games', async () => {

@@ -46,6 +46,45 @@ export function imageUrl(imageId, size = 't_cover_big') {
   return `${IGDB_IMAGE_BASE}/${size}/${imageId}.jpg`;
 }
 
+// Effective credentials: the admin UI (DB) wins, with env vars as a fallback
+// so a deployment can preconfigure IGDB without touching the database. A
+// complete pair is always taken from a single source as a whole.
+export function resolveIgdbCredentials(setting) {
+  if (setting?.igdbClientId && setting?.igdbClientSecret) {
+    return { clientId: setting.igdbClientId, clientSecret: setting.igdbClientSecret, source: 'settings' };
+  }
+  if (config.igdbClientId && config.igdbClientSecret) {
+    return { clientId: config.igdbClientId, clientSecret: config.igdbClientSecret, source: 'environment' };
+  }
+  // Half a pair in each place: still usable, attributed to the admin UI.
+  const clientId = setting?.igdbClientId || config.igdbClientId || null;
+  const clientSecret = setting?.igdbClientSecret || config.igdbClientSecret || null;
+  return { clientId, clientSecret, source: clientId && clientSecret ? 'settings' : null };
+}
+
+// Video names IGDB uses for a game's main trailer, best first. Anything else
+// (gameplay walkthroughs, interviews, teasers, ...) isn't confidently "the"
+// trailer, so it's never auto-selected; the admin can still set one by hand.
+const TRAILER_PREFERENCE = [
+  /\blaunch trailer\b/i,
+  /\bofficial trailer\b/i,
+  /\brelease trailer\b/i,
+  /^trailer$/i,
+  /\btrailer\b/i,
+];
+const NOT_A_TRAILER = /teaser|review|interview|walkthrough|let'?s play|developer diary|dev diary/i;
+
+export function pickTrailer(videos) {
+  const candidates = (videos ?? []).filter(
+    (v) => /^[\w-]{11}$/.test(v?.video_id ?? '') && !NOT_A_TRAILER.test(v.name ?? ''),
+  );
+  for (const pattern of TRAILER_PREFERENCE) {
+    const hit = candidates.find((v) => pattern.test((v.name ?? '').trim()));
+    if (hit) return hit.video_id;
+  }
+  return null;
+}
+
 export function createIgdbClient({ models }) {
   const { Setting } = models;
 
@@ -54,20 +93,16 @@ export function createIgdbClient({ models }) {
     return setting;
   }
 
-  // Effective credentials: the admin UI (DB) wins, with env vars as a fallback
-  // so a deployment can preconfigure IGDB without touching the database.
-  function resolveCredentials(setting) {
-    return {
-      clientId: setting.igdbClientId || config.igdbClientId,
-      clientSecret: setting.igdbClientSecret || config.igdbClientSecret,
-    };
+  function isConfigured(setting) {
+    const { clientId, clientSecret } = resolveIgdbCredentials(setting);
+    return Boolean(clientId && clientSecret);
   }
 
   // Obtain a valid OAuth token, refreshing via Twitch when missing or within the
   // refresh window. The token + expiry are persisted so they survive restarts.
   async function getToken(setting) {
     const s = setting ?? (await getSettings());
-    const { clientId, clientSecret } = resolveCredentials(s);
+    const { clientId, clientSecret } = resolveIgdbCredentials(s);
     if (!clientId || !clientSecret) {
       throw new Error('IGDB credentials are not configured');
     }
@@ -95,7 +130,7 @@ export function createIgdbClient({ models }) {
   async function request(endpoint, body) {
     const setting = await getSettings();
     const token = await getToken(setting);
-    const { clientId } = resolveCredentials(setting);
+    const { clientId } = resolveIgdbCredentials(setting);
     const res = await axios.post(`${IGDB_BASE}/${endpoint}`, body, {
       timeout: config.igdbTimeoutMs,
       headers: {
@@ -109,7 +144,7 @@ export function createIgdbClient({ models }) {
 
   const GAME_FIELDS =
     'fields name, summary, first_release_date, rating, genres.name, platforms.name, ' +
-    'cover.image_id, screenshots.image_id, artworks.image_id;';
+    'cover.image_id, screenshots.image_id, artworks.image_id, videos.name, videos.video_id;';
 
   async function search(query, limit = 10) {
     const safe = String(query).replace(/"/g, '');
@@ -141,7 +176,7 @@ export function createIgdbClient({ models }) {
     return { match: best, score: bestScore, results };
   }
 
-  return { getToken, search, getGame, autoMatch, getSettings };
+  return { getToken, search, getGame, autoMatch, getSettings, isConfigured };
 }
 
 export default createIgdbClient;

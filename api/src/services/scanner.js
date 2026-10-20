@@ -4,6 +4,7 @@ import { GAME_STATUS, JOB_STATUS } from '../db/index.js';
 import { processArtwork, extractColors } from './artwork.js';
 import { createArchive } from './compression.js';
 import { generateFolderName, parseFolderName } from './naming.js';
+import { metadataFields } from './metadata.js';
 
 // Derive a clean, searchable title from a folder/zip name:
 //   "HELLDIVERS.2.zip" -> "HELLDIVERS 2"
@@ -66,7 +67,9 @@ async function readArtworkAssets(artworkDir) {
   };
 }
 
-export function createScanner({ models, igdb, broadcaster, logger = NULL_LOGGER }) {
+// `metadata` is the provider-agnostic metadata service (services/metadata.js);
+// a bare IGDB client satisfies the same interface.
+export function createScanner({ models, metadata, broadcaster, logger = NULL_LOGGER }) {
   const { Library, Game, Screenshot, Job, Setting } = models;
   // Sequelize instance needed for transactions.
   const { sequelize } = Game;
@@ -168,17 +171,11 @@ export function createScanner({ models, igdb, broadcaster, logger = NULL_LOGGER 
   // Create or update the catalogued Game row + screenshots for a matched game.
   // Transaction so the game record and its screenshots are always written together
   async function upsertGame(igdbId, data, art, sourceName, { gamePath, archivePath, libraryPath: libPath }) {
-    const releaseYear = data.first_release_date
-      ? new Date(data.first_release_date * 1000).getUTCFullYear()
-      : null;
+    const meta = metadataFields(data);
     const fields = {
       igdbId,
-      title: data.name ?? cleanSourceName(sourceName),
-      releaseYear,
-      summary: data.summary ?? null,
-      genres: (data.genres ?? []).map((g) => g.name),
-      platforms: (data.platforms ?? []).map((p) => p.name),
-      rating: data.rating != null ? Math.round(data.rating) : null,
+      ...meta,
+      title: meta.title ?? cleanSourceName(sourceName),
       coverPath: art.coverPath,
       backgroundPath: art.backgroundPath,
       accentColorPrimary: art.accentPrimary,
@@ -239,11 +236,11 @@ export function createScanner({ models, igdb, broadcaster, logger = NULL_LOGGER 
 
     let data = null;
     try {
-      data = await igdb.getGame(igdbId);
+      data = await metadata.getGame(igdbId);
     } catch {
       data = null;
     }
-    // IGDB unreachable (offline, credentials not yet re-entered after a
+    // Provider unreachable (offline, credentials not yet re-entered after a
     // reinstall, rate-limited, ...): fall back to what the folder name itself
     // encodes rather than cleanSourceName-ing the whole, still scheme-shaped
     // name (which would leave the year/id baked into the title).
@@ -286,7 +283,7 @@ export function createScanner({ models, igdb, broadcaster, logger = NULL_LOGGER 
       const query = cleanSourceName(job.sourceName);
       throwIfCancelled();
       await setStage(job, GAME_STATUS.MATCHING, 15);
-      const { match } = await igdb.autoMatch(query);
+      const { match } = await metadata.autoMatch(query);
 
       if (!match) {
         // Below threshold hold as Unmatched, preserve the source for later
@@ -313,7 +310,7 @@ export function createScanner({ models, igdb, broadcaster, logger = NULL_LOGGER 
       job.igdbId = match.id;
       await setStage(job, GAME_STATUS.FETCHING_METADATA, 35);
       logger.system(`fetching metadata for "${match.name ?? query}"`, { meta: { igdbId: match.id } });
-      const data = (await igdb.getGame(match.id)) ?? match;
+      const data = (await metadata.getGame(match.id)) ?? match;
 
       // Build the named game folder structure inside the library path.
       const namingScheme = await getNamingScheme();

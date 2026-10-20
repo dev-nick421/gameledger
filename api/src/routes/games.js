@@ -10,7 +10,10 @@ import { generateDisplayName, generateDownloadFilename, generateFolderName } fro
 import { processArtwork } from '../services/artwork.js';
 import { createArchive } from '../services/compression.js';
 import { cleanSourceName } from '../services/scanner.js';
-import { isMissingMetadata } from '../services/metadataRefresh.js';
+import { isMissingMetadata, missingMetadataFields, needsMetadataRefresh } from '../services/metadataRefresh.js';
+import { metadataFields } from '../services/metadata.js';
+import { providerOf, providerIdOf } from '../services/providerIds.js';
+import { parseYoutubeId } from '../services/youtube.js';
 
 // In-memory upload buffering for hand-authored artwork
 const upload = multer({
@@ -40,7 +43,18 @@ function serializeCard(game, scheme) {
     coverUrl: coverUrl(game),
     displayName: generateDisplayName(game, scheme),
     downloadCount: game.downloadCount ?? 0,
+    // Library filters/sorting run client-side over the whole feed.
+    genres: game.genres ?? [],
+    platforms: game.platforms ?? [],
+    addedAt: game.createdAt,
   };
+}
+
+// A blank trailer field clears the trailer; anything else must be YouTube.
+function trailerError(body) {
+  const value = body.trailerUrl;
+  if (value === undefined || String(value).trim() === '') return null;
+  return parseYoutubeId(value) ? null : 'Trailer must be a YouTube link or video ID.';
 }
 
 // In-flight or failed jobs render as cards too, so the user always sees that a
@@ -58,7 +72,7 @@ function serializeJobCard(job) {
   };
 }
 
-export function gameRoutes({ models, igdb, namingSchemeProvider, metadataRefresher, logger }) {
+export function gameRoutes({ models, metadata, namingSchemeProvider, metadataRefresher, logger }) {
   const { Game, Screenshot, Job, Setting, Library } = models;
   const router = Router();
 
@@ -131,19 +145,26 @@ export function gameRoutes({ models, igdb, namingSchemeProvider, metadataRefresh
   router.get('/games/manage', requireAuth, async (req, res) => {
     const namingScheme = await scheme();
     const games = await Game.findAll({ order: [['title', 'ASC']] });
-    const items = games.map((g) => ({
-      igdbId: g.igdbId,
-      title: g.title,
-      releaseYear: g.releaseYear,
-      status: g.status,
-      custom: Boolean(g.custom),
-      downloadCount: g.downloadCount ?? 0,
-      hasArchive: Boolean(g.archivePath),
-      coverUrl: coverUrl(g),
-      displayName: generateDisplayName(g, namingScheme),
-      missingMetadata:
-        !g.custom && g.status === GAME_STATUS.COMPLETED ? isMissingMetadata(g) : false,
-    }));
+    const items = games.map((g) => {
+      const refreshable = !g.custom && g.status === GAME_STATUS.COMPLETED;
+      return {
+        igdbId: g.igdbId,
+        title: g.title,
+        releaseYear: g.releaseYear,
+        status: g.status,
+        custom: Boolean(g.custom),
+        provider: providerOf(g.igdbId),
+        downloadCount: g.downloadCount ?? 0,
+        hasArchive: Boolean(g.archivePath),
+        hasTrailer: Boolean(g.trailerYoutubeId),
+        coverUrl: coverUrl(g),
+        displayName: generateDisplayName(g, namingScheme),
+        missingMetadata: refreshable ? isMissingMetadata(g) : false,
+        missingFields: refreshable ? missingMetadataFields(g) : [],
+        // Would "Fill in missing metadata" touch this game?
+        needsRefresh: refreshable ? needsMetadataRefresh(g) : false,
+      };
+    });
     res.json({ items, total: items.length });
   });
 
@@ -207,6 +228,7 @@ export function gameRoutes({ models, igdb, namingSchemeProvider, metadataRefresh
     if (!body.title || !String(body.title).trim()) {
       return res.status(400).json({ error: 'Title is required.' });
     }
+    if (trailerError(body)) return res.status(400).json({ error: trailerError(body) });
 
     // Validate the source path is inside a known library to prevent traversal.
     const libraries = await Library.findAll();
@@ -308,6 +330,10 @@ export function gameRoutes({ models, igdb, namingSchemeProvider, metadataRefresh
       platforms: game.platforms ?? [],
       rating: game.rating,
       status: game.status,
+      provider: providerOf(game.igdbId),
+      providerId: providerIdOf(game.igdbId),
+      trailerYoutubeId: game.trailerYoutubeId ?? null,
+      downloadable: game.status === GAME_STATUS.COMPLETED && Boolean(game.archivePath),
       displayName: generateDisplayName(game, namingScheme),
       coverUrl: coverUrl(game),
       backgroundUrl: backgroundUrl(game),
@@ -379,16 +405,15 @@ export function gameRoutes({ models, igdb, namingSchemeProvider, metadataRefresh
 
     let data;
     try {
-      data = await igdb.getGame(newId);
+      data = await metadata.getGame(newId);
     } catch (err) {
-      return res.status(400).json({ error: err?.message ?? 'IGDB lookup failed' });
+      return res.status(400).json({ error: err?.message ?? 'Metadata lookup failed' });
     }
-    if (!data) return res.status(404).json({ error: 'No IGDB game with that id' });
+    if (!data) return res.status(404).json({ error: 'No game with that id' });
 
     const namingScheme = await scheme();
-    const releaseYear = data.first_release_date
-      ? new Date(data.first_release_date * 1000).getUTCFullYear()
-      : null;
+    const meta = metadataFields(data);
+    const { releaseYear } = meta;
 
     // Determine the library root to place the new game folder in.
     const libPath = game.libraryPath ?? (game.gamePath ? path.dirname(game.gamePath) : null);
@@ -444,12 +469,7 @@ export function gameRoutes({ models, igdb, namingSchemeProvider, metadataRefresh
 
     await Game.upsert({
       igdbId: newId,
-      title: data.name,
-      releaseYear,
-      summary: data.summary ?? null,
-      genres: (data.genres ?? []).map((g) => g.name),
-      platforms: (data.platforms ?? []).map((p) => p.name),
-      rating: data.rating != null ? Math.round(data.rating) : null,
+      ...meta,
       coverPath: art.coverPath,
       backgroundPath: art.backgroundPath,
       accentColorPrimary: art.accentPrimary,
@@ -487,6 +507,7 @@ export function gameRoutes({ models, igdb, namingSchemeProvider, metadataRefresh
       const r = Number(body.rating);
       target.rating = body.rating !== '' && Number.isFinite(r) ? Math.round(r) : null;
     }
+    if (body.trailerUrl !== undefined) target.trailerYoutubeId = parseYoutubeId(body.trailerUrl);
   }
 
   // Save cover/background/screenshot uploads into the game's artwork dir and
@@ -521,6 +542,7 @@ export function gameRoutes({ models, igdb, namingSchemeProvider, metadataRefresh
     if (!body.title || !String(body.title).trim()) {
       return res.status(400).json({ error: 'Title is required.' });
     }
+    if (trailerError(body)) return res.status(400).json({ error: trailerError(body) });
     const min = await Game.min('igdbId');
     const igdbId = Math.min(0, Number.isFinite(min) ? min : 0) - 1;
 
@@ -556,6 +578,7 @@ export function gameRoutes({ models, igdb, namingSchemeProvider, metadataRefresh
     if (body.title !== undefined && !String(body.title).trim()) {
       return res.status(400).json({ error: 'Title cannot be empty.' });
     }
+    if (trailerError(body)) return res.status(400).json({ error: trailerError(body) });
 
     if (game.status === GAME_STATUS.UNMATCHED && game.sourcePath) {
       // Collect the metadata the user supplied, falling back to what's stored.
