@@ -73,16 +73,22 @@ function setFilter(key, value) {
   router.replace({ query });
 }
 
+// Only touches the route; the q watcher below empties the search box. Setting
+// search here too would race the replace and write the old query back.
 function clearFilters() {
-  search.value = '';
   router.replace({ query: filters.value.sort === DEFAULT_SORT ? {} : { sort: filters.value.sort } });
 }
 
-watch(search, (q) => setFilter('q', q));
+// Both directions only while the library is the current route: navigating
+// away clears the query, which must not bounce back as a replace() on the
+// next page.
+watch(search, (q) => {
+  if (route.name === 'library') setFilter('q', q);
+});
 watch(
   () => route.query.q,
   (q) => {
-    if (String(q ?? '') !== search.value) search.value = String(q ?? '');
+    if (route.name === 'library' && String(q ?? '') !== search.value) search.value = String(q ?? '');
   },
 );
 
