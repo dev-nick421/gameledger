@@ -37,6 +37,14 @@ export async function buildServer({ storage } = {}) {
   const scheduler = createScheduler({ scanner, logger });
   const metadataRefresher = createMetadataRefresher({ models, metadata, broadcaster, logger });
 
+  // Heal libraries hit by an earlier scan that queued already-catalogued game
+  // folders as new input (leaving Unmatched duplicates pointing at the real
+  // folders). Database only, so it's safe to run on every boot.
+  await scanner.removeDuplicateEntries().catch((err) => {
+    // eslint-disable-next-line no-console
+    console.error('Duplicate cleanup failed:', err);
+  });
+
   const namingSchemeProvider = async () => {
     const [setting] = await models.Setting.findOrCreate({
       where: { id: 1 },

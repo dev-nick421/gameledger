@@ -91,8 +91,13 @@ function onSaved() {
 async function remove(game) {
   if (!window.confirm(`Delete "${game.title}"? This removes its files and cannot be undone.`)) return;
   try {
-    await client.delete(`/games/${game.igdbId}`);
-    toast.push(`Deleted “${game.title}”.`, 'info');
+    const { data } = await client.delete(`/games/${game.igdbId}`);
+    toast.push(
+      data.keptFiles?.length
+        ? `Removed “${game.title}”. Its folder belongs to another game in your library, so the files were kept.`
+        : `Deleted “${game.title}”.`,
+      'info',
+    );
     await load();
   } catch {
     toast.push('Failed to delete the game.', 'error');

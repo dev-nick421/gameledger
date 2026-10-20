@@ -5,6 +5,7 @@ import { processArtwork, extractColors } from './artwork.js';
 import { createArchive } from './compression.js';
 import { generateFolderName, parseFolderName } from './naming.js';
 import { metadataFields } from './metadata.js';
+import { exists, findArchive, overlaps, samePath } from './paths.js';
 
 // Derive a clean, searchable title from a folder/zip name:
 //   "HELLDIVERS.2.zip" -> "HELLDIVERS 2"
@@ -39,16 +40,17 @@ const NULL_LOGGER = { system: () => {}, scanner: () => {} };
 // matching it must never be treated as raw scan input  even if this database
 // has no record of it (fresh install, hand-arranged/restored library). Doing
 // so would re-match, re-compress the folder into itself, and then delete it
-// as a "source" once done.
-async function isStructuredGameFolder(fullPath) {
+// as a "source" once done. The archive is what counts: artwork/ can be
+// missing (older builds, failed downloads), so a data/*.zip under a name that
+// fits the naming scheme is recognised too.
+async function isStructuredGameFolder(fullPath, namingScheme) {
+  if (!(await findArchive(fullPath))) return false;
+  if (parseFolderName(path.basename(fullPath), namingScheme)) return true;
   try {
-    const artworkStat = await fs.promises.stat(path.join(fullPath, 'artwork'));
-    if (!artworkStat.isDirectory()) return false;
+    return (await fs.promises.stat(path.join(fullPath, 'artwork'))).isDirectory();
   } catch {
     return false;
   }
-  const dataFiles = await fs.promises.readdir(path.join(fullPath, 'data')).catch(() => []);
-  return dataFiles.some((f) => f.toLowerCase().endsWith('.zip'));
 }
 
 // Read back whatever artwork already exists on disk instead of re-downloading
@@ -117,18 +119,23 @@ export function createScanner({ models, metadata, broadcaster, logger = NULL_LOG
   // Also surfaces `structured`: directories that look like gameledger's own
   // output (artwork/ + data/*.zip) but aren't in the excluded set  i.e. this
   // database doesn't know about them yet. These are never queued as raw
-  // input; the caller adopts them instead (see adoptFolder).
+  // input; the caller adopts them instead (see adoptFolder). And `known`:
+  // folders whose name carries the id of a game the catalogue already has,
+  // found at a path other than the stored one (see relinkFolder).
   async function detectInputs(libraryPath, namingSchemeArg) {
     const namingScheme = namingSchemeArg ?? (await getNamingScheme());
     const knownGames = await Game.findAll({
       attributes: ['gamePath', 'sourcePath', 'igdbId', 'title', 'releaseYear', 'libraryPath'],
     });
+    const catalogued = new Set(knownGames.filter((g) => g.igdbId > 0).map((g) => g.igdbId));
 
+    // Resolved, so a path spelled differently from the stored one still matches.
     const excluded = new Set();
+    const exclude = (p) => excluded.add(path.resolve(p));
     for (const g of knownGames) {
-      if (g.sourcePath) excluded.add(g.sourcePath);
+      if (g.sourcePath) exclude(g.sourcePath);
       if (g.gamePath) {
-        excluded.add(g.gamePath);
+        exclude(g.gamePath);
       } else if (g.igdbId > 0 && g.libraryPath && g.title) {
         // Reconstruct the expected folder path from the stored identity so a re-scan doesn't treat the
         // already-processed game folder as a fresh source and destroy it
@@ -139,7 +146,7 @@ export function createScanner({ models, metadata, broadcaster, logger = NULL_LOG
             namingScheme,
           ),
         );
-        if (reconstructed) excluded.add(reconstructed);
+        if (reconstructed) exclude(reconstructed);
       }
     }
 
@@ -147,25 +154,123 @@ export function createScanner({ models, metadata, broadcaster, logger = NULL_LOG
     try {
       entries = await fs.promises.readdir(libraryPath, { withFileTypes: true });
     } catch {
-      return { inputs: [], structured: [] };
+      return { inputs: [], structured: [], known: [] };
     }
     const inputs = [];
     const structured = [];
+    const known = [];
     for (const entry of entries) {
       const full = path.join(libraryPath, entry.name);
-      if (excluded.has(full)) continue;
-      if (entry.isDirectory()) {
-        // eslint-disable-next-line no-await-in-loop
-        if (await isStructuredGameFolder(full)) {
-          structured.push({ name: entry.name, path: full });
-        } else {
-          inputs.push({ name: entry.name, path: full });
-        }
-      } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.zip')) {
+      if (excluded.has(path.resolve(full))) continue;
+      const isDir = entry.isDirectory();
+      const isZip = !isDir && entry.isFile() && entry.name.toLowerCase().endsWith('.zip');
+      if (!isDir && !isZip) continue;
+
+      // A name in the naming scheme that carries the id of a game already in
+      // the catalogue *is* that game, whatever its stored path says (library
+      // remounted or moved, path typed differently). It must never become raw
+      // input: the scheme-shaped name matches badly, so it would be parked as
+      // an Unmatched duplicate whose "source" is the real game folder.
+      const parsed = parseFolderName(isZip ? entry.name.replace(/\.zip$/i, '') : entry.name, namingScheme);
+      if (parsed && catalogued.has(parsed.igdbId)) {
+        if (isDir) known.push({ name: entry.name, path: full, igdbId: parsed.igdbId });
+        else logger.system(`skipped "${entry.name}": that game is already in the library`, { level: 'warn' });
+        continue;
+      }
+
+      // eslint-disable-next-line no-await-in-loop
+      if (isDir && (await isStructuredGameFolder(full, namingScheme))) {
+        structured.push({ name: entry.name, path: full });
+      } else {
         inputs.push({ name: entry.name, path: full });
       }
     }
-    return { inputs, structured };
+    return { inputs, structured, known };
+  }
+
+  // Point a catalogued game at a folder found under a different path than the
+  // stored one, when the stored folder no longer exists (library moved or
+  // remounted). If the stored folder is still there, the found one is a second
+  // copy: it's left alone and reported. Nothing on disk is moved or deleted.
+  async function relinkFolder(entry, libraryPath) {
+    const game = await Game.findByPk(entry.igdbId);
+    if (!game || game.status !== GAME_STATUS.COMPLETED || samePath(game.gamePath, entry.path)) return false;
+    if (await exists(game.gamePath)) {
+      logger.system(
+        `skipped "${entry.name}": "${game.title}" is already in the library at ${game.gamePath}`,
+        { level: 'warn', meta: { igdbId: game.igdbId } },
+      );
+      return false;
+    }
+    const archivePath = await findArchive(entry.path);
+    if (!archivePath) return false;
+
+    const art = await readArtworkAssets(path.join(entry.path, 'artwork'));
+    const keep = async (p) => ((await exists(p)) ? p : null);
+    const fields = {
+      gamePath: entry.path,
+      archivePath,
+      libraryPath,
+      sourcePath: null,
+      coverPath: art.coverPath ?? (await keep(game.coverPath)),
+      backgroundPath: art.backgroundPath ?? (await keep(game.backgroundPath)),
+    };
+    await sequelize.transaction(async (t) => {
+      await game.update(fields, { transaction: t });
+      if (art.screenshots.length) {
+        await Screenshot.destroy({ where: { igdbId: game.igdbId }, transaction: t });
+        await Screenshot.bulkCreate(
+          art.screenshots.map((s) => ({ igdbId: game.igdbId, path: s.path, order: s.order })),
+          { transaction: t },
+        );
+      }
+    });
+    logger.system(`relinked "${game.title}" to ${entry.path} (its stored folder no longer exists)`, {
+      meta: { igdbId: game.igdbId },
+    });
+    return true;
+  }
+
+  /**
+   * Remove Unmatched entries that are really a catalogued game seen twice:
+   * their "source" is that game's own folder, or a name in the naming scheme
+   * carrying its id (a scan that didn't recognise the folder queued it as raw
+   * input). Database only: the files belong to the catalogued game and are
+   * never touched. If that game's stored folder is gone, it's relinked to the
+   * duplicate's folder first.
+   */
+  async function removeDuplicateEntries() {
+    const namingScheme = await getNamingScheme();
+    const games = await Game.findAll();
+    const byId = new Map(games.map((g) => [g.igdbId, g]));
+    let removed = 0;
+    for (const dup of games) {
+      if (dup.status !== GAME_STATUS.UNMATCHED || !dup.sourcePath) continue;
+      const name = path.basename(dup.sourcePath).replace(/\.zip$/i, '');
+      const owner =
+        games.find((g) => g !== dup && g.gamePath && overlaps(dup.sourcePath, g.gamePath)) ??
+        byId.get(parseFolderName(name, namingScheme)?.igdbId);
+      if (!owner || owner === dup || owner.status !== GAME_STATUS.COMPLETED) continue;
+
+      // eslint-disable-next-line no-await-in-loop
+      if (!(await exists(owner.gamePath)) && (await findArchive(dup.sourcePath))) {
+        // eslint-disable-next-line no-await-in-loop
+        await relinkFolder(
+          { name, path: dup.sourcePath, igdbId: owner.igdbId },
+          dup.libraryPath ?? path.dirname(dup.sourcePath),
+        );
+      }
+      // eslint-disable-next-line no-await-in-loop
+      await Screenshot.destroy({ where: { igdbId: dup.igdbId } });
+      // eslint-disable-next-line no-await-in-loop
+      await Game.destroy({ where: { igdbId: dup.igdbId } });
+      logger.system(`removed duplicate entry "${dup.title}": its folder belongs to "${owner.title}"`, {
+        level: 'warn',
+        meta: { igdbId: owner.igdbId, duplicateId: dup.igdbId },
+      });
+      removed += 1;
+    }
+    return { removed };
   }
 
   // Create or update the catalogued Game row + screenshots for a matched game.
@@ -275,6 +380,7 @@ export function createScanner({ models, metadata, broadcaster, logger = NULL_LOG
     // Track any game folder created this run so a failed/cancelled job can be
     // rolled back to leave no half-written artifacts.
     let createdGamePath = null;
+    let tmpDest = null;
     try {
       throwIfCancelled();
       job.status = JOB_STATUS.RUNNING;
@@ -325,9 +431,27 @@ export function createScanner({ models, metadata, broadcaster, logger = NULL_LOG
       const artworkDir = path.join(gamePath, 'artwork');
       const dataDir = path.join(gamePath, 'data');
 
+      // The source already has the target folder's name: building the game
+      // folder there would archive it into itself and then delete it.
+      if (overlaps(gamePath, job.sourcePath)) {
+        throw new Error(`"${job.sourceName}" already has the name its game folder needs; rename it and retry`);
+      }
+      // The folder may already exist: re-processing a new copy of a game that's
+      // already catalogued replaces its archive in place. Anything else living
+      // there (another game, or files the library doesn't know) is off limits.
+      const occupant = await Game.findOne({ where: { gamePath } });
+      const preexisting = await exists(gamePath);
+      if (occupant && occupant.igdbId !== match.id) {
+        throw new Error(`${gamePath} already belongs to "${occupant.title}"`);
+      }
+      if (!occupant && preexisting) {
+        throw new Error(`${gamePath} already exists and isn't part of the library; move it aside and retry`);
+      }
+
       await fs.promises.mkdir(artworkDir, { recursive: true });
       await fs.promises.mkdir(dataDir, { recursive: true });
-      createdGamePath = gamePath;
+      // Only roll back a folder this run created; never an existing game's.
+      createdGamePath = preexisting ? null : gamePath;
 
       throwIfCancelled();
       const art = await processArtwork(match.id, data, artworkDir, abortController?.signal);
@@ -338,7 +462,7 @@ export function createScanner({ models, metadata, broadcaster, logger = NULL_LOG
       logger.system(`compressing "${folderName}" to .zip`, { meta: { level } });
       const archiveName = `${folderName}.zip`;
       const archivePath = path.join(dataDir, archiveName);
-      const tmpDest = `${archivePath}.tmp`;
+      tmpDest = `${archivePath}.tmp`;
 
       // Compress to a .tmp file in the same directory so the final rename is
       // always atomic (same filesystem as the destination). An abort tears the
@@ -376,6 +500,8 @@ export function createScanner({ models, metadata, broadcaster, logger = NULL_LOG
       // original always stays intact.
       if (createdGamePath) {
         await fs.promises.rm(createdGamePath, { recursive: true, force: true }).catch(() => {});
+      } else if (tmpDest) {
+        await fs.promises.rm(tmpDest, { force: true }).catch(() => {});
       }
       job.status = JOB_STATUS.FAILED;
       job.error = err?.cancelled
@@ -400,13 +526,18 @@ export function createScanner({ models, metadata, broadcaster, logger = NULL_LOG
     cancelRequested = false;
     abortController = new AbortController();
     try {
+      await removeDuplicateEntries();
       const libraries = await Library.findAll();
       const namingScheme = await getNamingScheme();
       const queued = [];
       let adopted = 0;
       for (const lib of libraries) {
         // eslint-disable-next-line no-await-in-loop
-        const { inputs, structured } = await detectInputs(lib.path, namingScheme);
+        const { inputs, structured, known } = await detectInputs(lib.path, namingScheme);
+        for (const folder of known) {
+          // eslint-disable-next-line no-await-in-loop
+          await relinkFolder(folder, lib.path);
+        }
         for (const folder of structured) {
           // eslint-disable-next-line no-await-in-loop
           if (await adoptFolder(folder, lib.path, namingScheme)) adopted += 1;
@@ -525,6 +656,18 @@ export function createScanner({ models, metadata, broadcaster, logger = NULL_LOG
    * to an active scan or will be handled by the server-restart reset.
    */
   async function refreshLibrary() {
+    // A moved/remounted library looks exactly like deleted games; relink what
+    // can be found under the library paths before pruning anything.
+    await removeDuplicateEntries();
+    const namingScheme = await getNamingScheme();
+    for (const lib of await Library.findAll()) {
+      // eslint-disable-next-line no-await-in-loop
+      const { known } = await detectInputs(lib.path, namingScheme);
+      for (const folder of known) {
+        // eslint-disable-next-line no-await-in-loop
+        await relinkFolder(folder, lib.path);
+      }
+    }
     const games = await Game.findAll();
     let removed = 0;
     for (const game of games) {
@@ -579,6 +722,7 @@ export function createScanner({ models, metadata, broadcaster, logger = NULL_LOG
     retryJob,
     cancelScan,
     refreshLibrary,
+    removeDuplicateEntries,
     isRunning,
     detectInputs,
   };
