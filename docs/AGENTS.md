@@ -53,6 +53,14 @@ scheme.
 Consequence: changing metadata or the naming scheme must **never** move or rename
 a physical file. A metadata correction is a cheap operation, not a re-download.
 
+**SteamGridDB-only games** (matched when IGDB isn't configured) need an identity
+too. Their SteamGridDB id is shifted into a reserved range,
+`STEAMGRID_ID_OFFSET + sgdbId` (`services/providerIds.js`, offset 1e9), so the
+`Game.igdbId` column stays a positive, unique, stable integer and every invariant
+above keeps holding; negative ids still mean custom/unmatched. In names the
+`<IGDB_ID>` token renders such ids as `sgdb-<id>`, and `parseFolderName` reads the
+prefix back, so adoption works for them too. Don't add a second identity column.
+
 ## Storage layout (current supersedes the brief)
 
 ⚠️ The original brief describes a flat `/storage/games/{igdb_id}.zip` layout. **That
@@ -127,6 +135,37 @@ Critical invariants:
 - Every stage transition is broadcast over `/ws` (global broadcast Phase 1 is
   single-admin, so no per-client targeting).
 
+## Metadata providers (`api/src/services/metadata.js`)
+
+Everything that needs metadata (scanner, refresher, rematch route, correction
+search) talks to the **metadata service**, not to a provider directly. It's built
+from whichever providers are configured and always returns IGDB-shaped data:
+
+- **IGDB only**: identity, metadata and artwork from IGDB (the original setup).
+- **SteamGridDB only** (`services/steamgriddb.js`): identity, title, release year
+  and artwork. SteamGridDB has no summaries, genres, platforms, ratings,
+  screenshots or trailers, so those stay blank ("Missing info").
+- **Both**: IGDB stays identity + metadata; SteamGridDB's best-scored portrait
+  grid and hero are preferred as cover/background via direct
+  `coverUrl`/`backgroundUrl` fields (`processArtwork` tries them first, then
+  falls back to IGDB images). The SteamGridDB game is found by title and must
+  clear `MATCH_THRESHOLD`, since SteamGridDB has no IGDB cross-reference.
+- Neither: matching throws a message pointing at **Settings → Providers**.
+
+`metadataFields(data)` is the single place provider data becomes Game columns,
+including `trailerYoutubeId` (via `pickTrailer`, which only accepts videos named
+like a trailer and rejects teasers/walkthroughs/interviews; no confident match
+means no trailer). The SteamGridDB client reads settings with `findByPk`, not
+`findOrCreate`: its cover/hero lookups run concurrently and SQLite can't run
+`findOrCreate`'s transactions side by side.
+
+Credentials for both providers resolve **DB-first (admin UI), env-fallback**
+(`IGDB_CLIENT_ID`/`IGDB_CLIENT_SECRET`, `STEAMGRIDDB_API_KEY`). Every env var the
+API reads that `.env.example` documents must also be forwarded under the api
+service in `docker-compose.yml` (compose only substitutes `.env` into the compose
+file; containers see nothing that isn't listed). `api/test/compose.test.js`
+enforces this.
+
 ## IGDB integration (`api/src/services/igdb.js`)
 
 - OAuth token (Twitch client-credentials) is **persisted on the `Setting` row**
@@ -139,8 +178,10 @@ Critical invariants:
   saving the typed credentials it now saves first.)
 - `autoMatch()` scores results with a bigram Dice-coefficient `similarity()`;
   nothing clearing `MATCH_THRESHOLD` ⇒ caller marks the game `Unmatched`.
-- **Secrets are never serialised.** `GET /api/settings` exposes only an
-  `igdbConfigured` boolean, true if either source has credentials.
+- **Secrets are never serialised.** `GET /api/settings` exposes only
+  `igdbConfigured`/`steamGridConfigured` booleans plus `igdbSource`/
+  `steamGridSource` (`"settings"`, `"environment"` or null) so the UI can explain
+  why an env-provided key can't be removed there.
 
 ## Auth (Phase 1)
 
@@ -165,10 +206,19 @@ Critical invariants:
   `showRecentlyAdded`, readable without auth so the library page works pre-login).
 - `POST /api/scan` (409 if running), `GET /api/queue` (grouped
   running/pending/failed/completed), `POST /api/queue/:id/retry`,
-  `DELETE /api/queue` (cancel pending).
+  `DELETE /api/queue` (cancel pending), `DELETE /api/queue/:id` (dismiss one
+  finished job; 409 while it's pending/running) and `DELETE /api/queue/failed`
+  (dismiss all failed). Dismissing never touches disk; the source is simply
+  picked up again by the next scan.
 - `GET /api/games`, `GET /api/games/:igdbId`, `GET /api/games/:igdbId/download`.
 - `PATCH /api/games/:igdbId/match` reassign IGDB match (see below).
-- `GET /api/igdb/search?q=` admin-only, feeds the correction modal.
+- `GET /api/providers/search?q=` (alias: `/api/igdb/search`) admin-only, feeds
+  the correction modal; IGDB when configured, else SteamGridDB (with thumbnails).
+- `POST /api/settings/test-igdb`, `POST /api/settings/test-steamgrid` live probes.
+- `GET /api/catalog` (public): every downloadable game with full metadata,
+  download URL and size, for third-party clients (launcher plugins like
+  Playnite). Versioned: bump `CATALOG_VERSION` only when removing or changing the
+  meaning of a field.
 - `POST /api/games/refresh-metadata` (`services/metadataRefresh.js`,
   admin-only, 409 if one is already running): bulk-refreshes catalogued games
   from IGDB. `{ mode: "all" }` unconditionally overwrites metadata and
@@ -217,6 +267,14 @@ this is a cheap rename rather than a re-download.
   navigation (don't re-open a per-view socket).
 - Grid / List / Plain view toggle, persisted in localStorage. Grid scales 2→6
   columns across breakpoints.
+- **Search/sort/filter run client-side** over the whole feed (`lib/libraryFilters.js`;
+  the page fetches every page of `/api/games`). State lives in the URL query.
+  While a search or genre/platform filter is active the rails are hidden.
+- **Tooltips use the `v-tooltip` directive** (`directives/tooltip.js`): one shared
+  element in `<body>` with fixed positioning, so scroll containers never clip it.
+  Prefer it over `title=` for anything a user needs to read.
+- Trailers are a click-to-play facade (`TrailerPlayer.vue`): nothing is requested
+  from YouTube until play is pressed, and the embed uses youtube-nocookie.com.
 - Detail page hero gradient is built from `accentColorPrimary/Secondary` **computed
   once at scan time and stored in the DB** zero per-request work, no client-side
   extraction flash.
@@ -225,7 +283,9 @@ this is a cheap rename rather than a re-download.
 - Navigation is minimal (doc 014): the Library is the default landing page; chrome
   is a small top-right cluster (theme toggle, a cogwheel Settings link shown only
   when logged in, Login/Logout). There is **no standalone Scan route** the scan
-  dashboard lives as a section at the top of Settings.
+  dashboard lives as a section at the top of Settings. Settings categories are
+  grouped (Library / Metadata / System); provider credentials live under
+  Providers (`/admin/providers`; `/admin/igdb` redirects there).
 - A horizontal **"Recently added" rail** sits above the grid, the first of several
   planned library rails; toggled via `Setting.showRecentlyAdded` (default true).
 
@@ -246,7 +306,7 @@ this is a cheap rename rather than a re-download.
 ## Roadmap (not built unless a doc says so)
 
 - **Phase 2:** collections, user accounts, advanced filters, enhanced artwork.
-- **Phase 3:** trailers, analytics, multi-library, TV-optimised UI, download stats.
+- **Phase 3:** analytics, multi-library, TV-optimised UI, download stats (trailers have shipped).
 - Other intended future work: duplicate detection, game statistics, advanced
   search, custom naming schemes.
 
