@@ -1,0 +1,116 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light dark;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  @apply bg-gray-50 text-gray-900 antialiased dark:bg-shelf-bg dark:text-gray-100;
+  margin: 0;
+  /* Full-bleed sections use 100vw, which includes the scrollbar width. */
+  overflow-x: clip;
+  font-family: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-feature-settings: 'cv11', 'ss01';
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-shelf-accent/60 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:cursor-not-allowed dark:focus-visible:ring-offset-shelf-bg;
+  }
+  .btn-primary {
+    @apply btn bg-shelf-accent text-white shadow-sm shadow-shelf-accent/25 hover:brightness-110 active:brightness-95 disabled:opacity-50;
+  }
+  .btn-ghost {
+    @apply btn bg-gray-200/70 text-gray-800 hover:bg-gray-300/70 disabled:opacity-50 dark:bg-shelf-elevated dark:text-gray-100 dark:hover:bg-shelf-border;
+  }
+  .btn-danger {
+    @apply btn bg-red-500/10 text-red-600 hover:bg-red-500/15 disabled:opacity-50 dark:text-red-400;
+  }
+  /* Square, icon-only button (toolbar/header actions). Pair with v-tooltip. */
+  .icon-btn {
+    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-shelf-accent/60 disabled:opacity-40 dark:text-gray-400 dark:hover:bg-shelf-elevated dark:hover:text-gray-100;
+  }
+  .card {
+    @apply rounded-xl border border-gray-200/80 bg-white shadow-sm dark:border-shelf-border/70 dark:bg-shelf-surface;
+  }
+  .input {
+    @apply w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm outline-none transition placeholder:text-gray-400 focus:border-shelf-accent focus:ring-2 focus:ring-shelf-accent/20 disabled:opacity-60 dark:border-shelf-border dark:bg-shelf-elevated dark:text-gray-100 dark:placeholder:text-gray-500;
+  }
+  .label {
+    @apply mb-1.5 block text-sm font-medium text-gray-600 dark:text-gray-300;
+  }
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold;
+  }
+  /* Rounded "pill" used for filters and tags. */
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 transition hover:border-gray-300 hover:bg-gray-50 dark:border-shelf-border dark:bg-shelf-surface dark:text-gray-200 dark:hover:border-shelf-border dark:hover:bg-shelf-elevated;
+  }
+  .chip-active {
+    @apply border-shelf-accent/50 bg-shelf-accent/10 text-shelf-accent hover:bg-shelf-accent/15 dark:border-shelf-accent/50 dark:bg-shelf-accent/10 dark:text-shelf-accent dark:hover:bg-shelf-accent/15;
+  }
+  .section-title {
+    @apply flex items-center gap-2 text-lg font-semibold tracking-tight;
+  }
+  .section-desc {
+    @apply mt-1 text-sm text-gray-500 dark:text-gray-400;
+  }
+  .alert-error {
+    @apply rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-400;
+  }
+  .alert-success {
+    @apply rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-400;
+  }
+  .skeleton {
+    @apply animate-pulse rounded-lg bg-gray-200 dark:bg-shelf-elevated;
+  }
+  .modal-backdrop {
+    @apply fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm;
+  }
+}
+
+@layer utilities {
+  /* Hide the native horizontal scrollbar on rails that scroll via arrows */
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Floating label rendered by the v-tooltip directive (see directives/tooltip.js). */
+.gl-tooltip {
+  position: fixed;
+  z-index: 60;
+  max-width: 18rem;
+  padding: 0.375rem 0.625rem;
+  border-radius: 0.5rem;
+  background: #1f1520;
+  color: #f9fafb;
+  font-size: 0.75rem;
+  line-height: 1.1rem;
+  font-weight: 500;
+  white-space: pre-line;
+  box-shadow: 0 10px 25px -5px rgb(0 0 0 / 0.35);
+  border: 1px solid #3a2438;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(2px);
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+}
+.gl-tooltip[data-show='true'] {
+  opacity: 1;
+  transform: translateY(0);
+}
