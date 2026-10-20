@@ -24,6 +24,9 @@ export const config = {
   igdbClientId: process.env.IGDB_CLIENT_ID ?? null,
   igdbClientSecret: process.env.IGDB_CLIENT_SECRET ?? null,
 
+  // SteamGridDB API key (artwork provider; usable with or without IGDB).
+  steamGridDbApiKey: process.env.STEAMGRIDDB_API_KEY ?? null,
+
   // IGDB auto-match: results scoring below this similarity are left Unmatched.
   matchThreshold: Number(process.env.MATCH_THRESHOLD ?? 0.6),
 

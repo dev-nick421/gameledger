@@ -17,6 +17,12 @@ services:
       PORT: 3000
       DATABASE_PATH: /app/data/gameledger.sqlite
       MATCH_THRESHOLD: ${MATCH_THRESHOLD:-0.6}
+      TOKEN_REFRESH_WINDOW_MS: ${TOKEN_REFRESH_WINDOW_MS:-86400000}
+      # Optional metadata provider credentials -> can also be entered in
+      # Settings → Providers. Values saved in the UI take precedence.
+      IGDB_CLIENT_ID: ${IGDB_CLIENT_ID:-}
+      IGDB_CLIENT_SECRET: ${IGDB_CLIENT_SECRET:-}
+      STEAMGRIDDB_API_KEY: ${STEAMGRIDDB_API_KEY:-}
     volumes:
       - api-data:/app/data
       # Mount your game library (read-write so processed sources can be removed).
