@@ -58,7 +58,7 @@ async function save() {
 
 <template>
   <section class="card p-5">
-    <h2 class="mb-4 text-lg font-semibold">Library options</h2>
+    <h2 class="section-title mb-4">Library options</h2>
 
     <label class="mb-1 block text-sm text-gray-500">Naming scheme</label>
     <input v-model="settings.namingScheme" class="input mb-2" placeholder="<Game Name> - <Release Year> [<IGDB_ID>]" />
@@ -67,7 +67,7 @@ async function save() {
       <ul class="space-y-1">
         <li><code class="text-shelf-accent">&lt;Game Name&gt;</code> full title of the game</li>
         <li><code class="text-shelf-accent">&lt;Release Year&gt;</code> the game's release year</li>
-        <li><code class="text-shelf-accent">&lt;IGDB_ID&gt;</code> its ID on the Internet Game Database</li>
+        <li><code class="text-shelf-accent">&lt;IGDB_ID&gt;</code> its ID on the Internet Game Database (SteamGridDB-matched games use <code>sgdb-&lt;id&gt;</code>)</li>
       </ul>
       <p class="mt-2">
         <code class="text-shelf-accent">&lt;IGDB_ID&gt;</code> is required it keeps every folder name unique.
@@ -77,7 +77,7 @@ async function save() {
 
   <!-- Library sections -> show/hide and reorder the home-page rails. -->
   <section class="card mt-4 p-5">
-    <h2 class="flex items-center gap-2 text-lg font-semibold">
+    <h2 class="section-title">
       <svg class="h-5 w-5 text-shelf-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <rect x="3" y="4" width="18" height="5" rx="1" /><rect x="3" y="13" width="18" height="5" rx="1" />
       </svg>
@@ -109,7 +109,8 @@ async function save() {
           <button
             class="rounded p-1 text-gray-400 transition hover:bg-gray-100 disabled:opacity-30 dark:hover:bg-shelf-elevated"
             :disabled="i === 0"
-            title="Move up"
+            v-tooltip="'Move up'"
+            aria-label="Move up"
             @click="move(i, -1)"
           >
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15" /></svg>
@@ -117,7 +118,8 @@ async function save() {
           <button
             class="rounded p-1 text-gray-400 transition hover:bg-gray-100 disabled:opacity-30 dark:hover:bg-shelf-elevated"
             :disabled="i === sections.length - 1"
-            title="Move down"
+            v-tooltip="'Move down'"
+            aria-label="Move down"
             @click="move(i, 1)"
           >
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9" /></svg>

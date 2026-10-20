@@ -1,17 +1,19 @@
+import { formatProviderId, parseProviderId } from './providerIds.js';
+
 // Generates user-facing display names from the configured naming scheme.
 // Physical archives are always {igdb_id}.zip; this is presentation only.
 //
 // Supported tokens:
 //   <Game Name>     -> title
 //   <Release Year>  -> releaseYear (omitted segment collapses cleanly)
-//   <IGDB_ID>       -> igdbId
+//   <IGDB_ID>       -> the game's id (SteamGridDB ids render as "sgdb-<id>")
 
 export function generateDisplayName(game, scheme) {
   const tmpl = scheme ?? '<Game Name> - <Release Year> [<IGDB_ID>]';
   return tmpl
     .replaceAll('<Game Name>', game.title ?? game.sourceName ?? 'Unknown')
     .replaceAll('<Release Year>', game.releaseYear != null ? String(game.releaseYear) : '')
-    .replaceAll('<IGDB_ID>', String(game.igdbId))
+    .replaceAll('<IGDB_ID>', formatProviderId(game.igdbId))
     .replace(/\s{2,}/g, ' ')
     .replace(/\s+\[\s*\]/g, '')
     .replace(/-\s*$/, '')
@@ -71,7 +73,7 @@ export function parseFolderName(name, scheme) {
     groupCount += 1;
     if (match[0] === '<IGDB_ID>') {
       idGroup = groupCount;
-      pattern += '(\\d+)';
+      pattern += '((?:sgdb-)?\\d+)';
     } else if (match[0] === '<Game Name>') {
       titleGroup = groupCount;
       pattern += '(.+?)';
@@ -86,8 +88,8 @@ export function parseFolderName(name, scheme) {
 
   const m = name.trim().match(new RegExp(`^\\s*${pattern}\\s*$`));
   if (!m) return null;
-  const id = Number(m[idGroup]);
-  if (!Number.isInteger(id) || id <= 0) return null;
+  const id = parseProviderId(m[idGroup]);
+  if (id == null) return null;
 
   const title = titleGroup > 0 ? m[titleGroup].trim() : null;
   const yearRaw = yearGroup > 0 ? m[yearGroup] : '';

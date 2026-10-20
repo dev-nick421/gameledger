@@ -54,6 +54,29 @@ export function scanRoutes({ models, scanner, logger }) {
     return res.status(202).json({ retrying: true });
   });
 
+  // Dismiss every failed job from the queue. Their sources are untouched on
+  // disk, so anything dismissed is simply picked up again by the next scan.
+  router.delete('/queue/failed', requireAuth, async (req, res) => {
+    const cleared = await Job.destroy({ where: { status: JOB_STATUS.FAILED } });
+    if (cleared) {
+      logger?.user(`cleared ${cleared} failed job${cleared === 1 ? '' : 's'} from the queue`, { meta: { cleared } });
+    }
+    res.json({ cleared });
+  });
+
+  // Dismiss one finished job. Pending/running jobs belong to the active scan
+  // and can only be stopped by cancelling it.
+  router.delete('/queue/:jobId', requireAuth, async (req, res) => {
+    const job = await Job.findByPk(req.params.jobId);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    if (job.status === JOB_STATUS.PENDING || job.status === JOB_STATUS.RUNNING) {
+      return res.status(409).json({ error: 'Job is still active; cancel the scan instead.' });
+    }
+    await job.destroy();
+    logger?.user(`cleared "${job.sourceName}" from the queue`, { meta: { jobId: job.id } });
+    res.json({ cleared: 1 });
+  });
+
   // Cancel the active scan: aborts the in-flight game (downloads/compression),
   // discards its partial folder, and clears every pending job. Source files are
   // left untouched. This is the escape hatch for a stuck scan.

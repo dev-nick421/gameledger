@@ -36,7 +36,7 @@ async function save() {
   <ScanSection />
 
   <section class="card mt-4 p-5">
-    <h2 class="flex items-center gap-2 text-lg font-semibold">
+    <h2 class="section-title">
       <svg class="h-5 w-5 text-shelf-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M21 8v13H3V8" /><path d="M1 3h22v5H1z" /><line x1="10" y1="12" x2="14" y2="12" />
       </svg>

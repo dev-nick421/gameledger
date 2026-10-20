@@ -64,6 +64,7 @@ export function createDatabase({ storage } = {}) {
       igdbClientSecret: { type: DataTypes.STRING, allowNull: true },
       igdbToken: { type: DataTypes.STRING, allowNull: true },
       igdbTokenExpiresAt: { type: DataTypes.DATE, allowNull: true },
+      steamGridDbApiKey: { type: DataTypes.STRING, allowNull: true },
       namingScheme: {
         type: DataTypes.STRING,
         allowNull: false,
@@ -132,7 +133,8 @@ export function createDatabase({ storage } = {}) {
     'Game',
     {
       // IGDB ID is the canonical identity. Unmatched games use a temporary
-      // negative placeholder id until corrected.
+      // negative placeholder id until corrected; SteamGridDB-matched games use
+      // an offset id (see services/providerIds.js).
       igdbId: { type: DataTypes.INTEGER, primaryKey: true },
       title: { type: DataTypes.STRING, allowNull: false },
       releaseYear: { type: DataTypes.INTEGER, allowNull: true },
@@ -144,6 +146,10 @@ export function createDatabase({ storage } = {}) {
       backgroundPath: { type: DataTypes.STRING, allowNull: true },
       accentColorPrimary: { type: DataTypes.STRING, allowNull: true },
       accentColorSecondary: { type: DataTypes.STRING, allowNull: true },
+      // YouTube video id of the game's trailer: auto-picked from IGDB when it
+      // has a confident match, or set by hand from Manage Games. null = never
+      // set (refreshes may fill it); '' = removed by hand (refreshes leave it).
+      trailerYoutubeId: { type: DataTypes.STRING, allowNull: true },
       status: {
         type: DataTypes.STRING,
         allowNull: false,

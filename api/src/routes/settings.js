@@ -1,16 +1,21 @@
 import { Router } from 'express';
-import { config } from '../config.js';
 import { requireAuth } from '../middleware/auth.js';
 import { validateNamingScheme } from '../services/naming.js';
 import { isValidSchedule } from '../services/scheduler.js';
+import { resolveIgdbCredentials } from '../services/igdb.js';
+import { resolveSteamGridKey } from '../services/steamgriddb.js';
 
-// Secrets are never returned to the client only whether IGDB is configured.
-// Credentials may come from the DB (admin UI) or env vars.
+// Secrets are never returned to the client only whether each provider is
+// configured, and where from ("settings" = admin UI, "environment" = env vars)
+// so the UI can explain why an env-provided key can't be removed there.
 function serialize(setting) {
-  const clientId = setting.igdbClientId || config.igdbClientId;
-  const clientSecret = setting.igdbClientSecret || config.igdbClientSecret;
+  const igdb = resolveIgdbCredentials(setting);
+  const steamGrid = resolveSteamGridKey(setting);
   return {
-    igdbConfigured: Boolean(clientId && clientSecret),
+    igdbConfigured: Boolean(igdb.clientId && igdb.clientSecret),
+    igdbSource: igdb.source,
+    steamGridConfigured: Boolean(steamGrid.key),
+    steamGridSource: steamGrid.source,
     namingScheme: setting.namingScheme,
     scanSchedule: setting.scanSchedule,
     refreshSchedule: setting.refreshSchedule,
@@ -45,7 +50,7 @@ export function normaliseSections(stored) {
   return out;
 }
 
-export function settingsRoutes({ models, igdb, scheduler, logger }) {
+export function settingsRoutes({ models, providers, scheduler, logger }) {
   const { Setting } = models;
   const router = Router();
 
@@ -74,6 +79,7 @@ export function settingsRoutes({ models, igdb, scheduler, logger }) {
     const {
       igdbClientId,
       igdbClientSecret,
+      steamGridDbApiKey,
       namingScheme,
       scanSchedule,
       refreshSchedule,
@@ -102,6 +108,7 @@ export function settingsRoutes({ models, igdb, scheduler, logger }) {
 
     if (igdbClientId !== undefined) setting.igdbClientId = igdbClientId || null;
     if (igdbClientSecret !== undefined) setting.igdbClientSecret = igdbClientSecret || null;
+    if (steamGridDbApiKey !== undefined) setting.steamGridDbApiKey = steamGridDbApiKey || null;
     if (showRecentlyAdded !== undefined) setting.showRecentlyAdded = Boolean(showRecentlyAdded);
 
     if (librarySections !== undefined) {
@@ -147,10 +154,20 @@ export function settingsRoutes({ models, igdb, scheduler, logger }) {
   // Verify IGDB credentials end-to-end: fetch a token and run a probe search.
   router.post('/settings/test-igdb', requireAuth, async (req, res) => {
     try {
-      const results = await igdb.search('the witcher', 1);
+      const results = await providers.igdb.search('the witcher', 1);
       res.json({ ok: true, sample: results[0]?.name ?? null });
     } catch (err) {
       res.status(400).json({ ok: false, error: err?.message ?? 'IGDB request failed' });
+    }
+  });
+
+  // Same probe for the SteamGridDB API key.
+  router.post('/settings/test-steamgrid', requireAuth, async (req, res) => {
+    try {
+      const results = await providers.steamgrid.search('the witcher', 1);
+      res.json({ ok: true, sample: results[0]?.name ?? null });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err?.message ?? 'SteamGridDB request failed' });
     }
   });
 

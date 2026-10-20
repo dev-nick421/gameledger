@@ -7,7 +7,8 @@ import { libraryRoutes } from './routes/libraries.js';
 import { scanRoutes } from './routes/scan.js';
 import multer from 'multer';
 import { gameRoutes } from './routes/games.js';
-import { igdbRoutes } from './routes/igdb.js';
+import { providerRoutes } from './routes/providers.js';
+import { catalogRoutes } from './routes/catalog.js';
 import { artworkRoutes } from './routes/artwork.js';
 import { logRoutes } from './routes/logs.js';
 
@@ -16,18 +17,28 @@ import { logRoutes } from './routes/logs.js';
  * out of this factory lets tests inject an in-memory DB and fake services and
  * exercise the whole stack over HTTP.
  */
-export function createApp({ models, igdb, scanner, scheduler, metadataRefresher, logger, namingSchemeProvider }) {
+export function createApp({
+  models,
+  metadata,
+  providers,
+  scanner,
+  scheduler,
+  metadataRefresher,
+  logger,
+  namingSchemeProvider,
+}) {
   const app = express();
   app.use(cors());
   app.use(express.json());
 
   app.use('/api', healthRoutes());
   app.use('/api', authRoutes({ logger }));
-  app.use('/api', settingsRoutes({ models, igdb, scheduler, logger }));
+  app.use('/api', settingsRoutes({ models, providers, scheduler, logger }));
   app.use('/api', libraryRoutes({ models, logger }));
   app.use('/api', scanRoutes({ models, scanner, logger }));
-  app.use('/api', gameRoutes({ models, igdb, namingSchemeProvider, metadataRefresher, logger }));
-  app.use('/api', igdbRoutes({ igdb }));
+  app.use('/api', gameRoutes({ models, metadata, namingSchemeProvider, metadataRefresher, logger }));
+  app.use('/api', providerRoutes({ metadata }));
+  app.use('/api', catalogRoutes({ models, namingSchemeProvider }));
   app.use('/api', artworkRoutes({ models }));
   app.use('/api', logRoutes({ models, logger }));
 

@@ -60,7 +60,7 @@ async function makeScanner() {
   await models.Setting.upsert({ id: 1, igdbClientId: 'cid', igdbClientSecret: 'csecret' });
   const broadcaster = createBroadcaster();
   const igdb = createIgdbClient({ models });
-  const scanner = createScanner({ models, igdb, broadcaster });
+  const scanner = createScanner({ models, metadata: igdb, broadcaster });
   return { sequelize, models, scanner };
 }
 
@@ -260,7 +260,7 @@ describe('scan pipeline', () => {
     const events = [];
     const fakeBroadcaster = { broadcast: (e) => events.push(e) };
     const igdb = createIgdbClient({ models: ctx.models });
-    const scanner = createScanner({ models: ctx.models, igdb, broadcaster: fakeBroadcaster });
+    const scanner = createScanner({ models: ctx.models, metadata: igdb, broadcaster: fakeBroadcaster });
 
     makeGameFolder(libRoot, 'Helldivers 2');
     await ctx.models.Library.create({ path: libRoot });
